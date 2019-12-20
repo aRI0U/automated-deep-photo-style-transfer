@@ -5,7 +5,8 @@ from datetime import datetime
 
 import cv2
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 from PIL import Image
 
 import components.NIMA.model as nima
@@ -201,6 +202,14 @@ def save_image(image, filename):
 
 
 def change_filename(dir_name, filename, suffix, extension=None):
+    r"""
+        Adds a suffix at the end of file
+
+        Example
+        -------
+        >>> change_filename('.', 'image.png', '_seg')
+        ./image_seg.png
+    """
     path, ext = os.path.splitext(filename)
     if extension is None:
         extension = ext
@@ -236,8 +245,8 @@ def write_metadata(dir, args, load_segmentation):
 if __name__ == "__main__":
     """Parse program arguments"""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--content_image", type=str, help="content image path", default="content.png")
-    parser.add_argument("--style_image", type=str, help="style image path", default="style.png")
+    parser.add_argument("--content_image", type=str, help="content image path", default="content.jpg")
+    parser.add_argument("--style_image", type=str, help="style image path", default="style.jpg")
     parser.add_argument("--output_image", type=str, help="Output image path, default: result.jpg",
                         default="result.jpg")
     parser.add_argument("--iterations", type=int, help="Number of iterations, default: 4000",
@@ -279,7 +288,7 @@ if __name__ == "__main__":
     init_image_options = ["noise", "content", "style"]
     similarity_metric_options = ["li", "wpath", "jcn", "lin", "wup", "res"]
     parser.add_argument("--init", type=str, help="Initialization image (%s).", default="content")
-    parser.add_argument("--gpu", help="comma separated list of GPU(s) to use.", default="0")
+    parser.add_argument("--gpu", help="comma separated list of GPU(s) to use.", default="")
 
     args = parser.parse_args()
     assert (args.init in init_image_options)
@@ -305,7 +314,7 @@ if __name__ == "__main__":
     for path in [args.content_image, args.style_image]:
         if path is None or not os.path.isfile(path):
             print("Image file {} does not exist.".format(path))
-            exit(0)
+            exit(1)
 
     content_image = load_image(args.content_image)
     style_image = load_image(args.style_image)
@@ -317,6 +326,8 @@ if __name__ == "__main__":
         style_segmentation_image = cv2.imread(style_segmentation_filename)
         content_segmentation_masks = extract_segmentation_masks(content_segmentation_image)
         style_segmentation_masks = extract_segmentation_masks(style_segmentation_image)
+
+    # otherwise compute it
     else:
         print("Create segmentation.")
         content_segmentation, style_segmentation = compute_segmentation(args.content_image, args.style_image)

@@ -4,7 +4,8 @@ from operator import itemgetter
 import networkx as nx
 import nltk
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 from os.path import join
 
 from components.PSPNet.model import load_color_label_dict
