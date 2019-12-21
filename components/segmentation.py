@@ -93,7 +93,7 @@ def load_img(img_path):
 
     if ext.lower() == 'png':
         return tf.image.decode_png(tf.read_file(img_path), channels=3)
-    elif ext.lower() == 'jpg':
+    elif ext.lower() in ['jpg','jpeg']:
         return tf.image.decode_jpeg(tf.read_file(img_path), channels=3)
     else:
         print('cannot process {0} file.'.format(filename))

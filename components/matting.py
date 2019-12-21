@@ -5,7 +5,7 @@ import scipy.sparse.linalg
 import tensorflow as tf
 
 
-def compute_matting_laplacian(image, consts=None, epsilon=1e-5, window_radius=1):
+def matting_laplacian(image, consts=None, epsilon=1e-5, window_radius=1):
     print("Compute matting laplacian started")
 
     num_window_pixels = (window_radius * 2 + 1) ** 2
@@ -65,3 +65,11 @@ def compute_matting_laplacian(image, consts=None, epsilon=1e-5, window_radius=1)
     laplacian_tf = tf.to_float(tf.SparseTensor(indices, laplacian_coo.data, laplacian_coo.shape))
 
     return laplacian_tf
+
+def fast_matting_laplacian(image, consts=None, epsilon=1e-5, window_radius=1):
+    print("Compute matting laplacian started")
+    dense = tf.eye(image.shape[0]*image.shape[1])
+    zero = tf.constant(0, dtype=tf.float32)
+    indices = tf.where(tf.not_equal(dense, zero))
+    values = tf.gather_nd(dense, indices)
+    return tf.SparseTensor(indices, values, dense.shape)
