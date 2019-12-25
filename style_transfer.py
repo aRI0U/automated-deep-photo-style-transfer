@@ -172,12 +172,8 @@ def calculate_photorealism_regularization(output, content_image, matting_method)
         matting = matting_laplacian(content_image[0, ...])
 
     # compute photorealism regularization loss
-    regularization_channels = []
-    for output_channel in tf.unstack(output, axis=-1):
-        channel_vector = tf.reshape(tf.transpose(a=output_channel), shape=[-1])
-        matmul_right = tf.sparse.sparse_dense_matmul(matting, tf.expand_dims(channel_vector, -1))
-        matmul_left = tf.matmul(tf.expand_dims(channel_vector, 0), matmul_right)
-        regularization_channels.append(matmul_left)
+    v = tf.reshape(tf.transpose(output), (output.shape[-1], -1))
+    regularization_channels = tf.expand_dims(v,1) @ matting(tf.expand_dims(v,2))
 
     regularization = tf.reduce_sum(input_tensor=regularization_channels)
     return regularization

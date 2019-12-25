@@ -64,12 +64,36 @@ def matting_laplacian(image, consts=None, epsilon=1e-5, window_radius=1):
     indices = np.mat([laplacian_coo.row, laplacian_coo.col]).transpose()
     laplacian_tf = tf.to_float(tf.SparseTensor(indices, laplacian_coo.data, laplacian_coo.shape))
 
-    return laplacian_tf
+    return lambda x: tf.sparse.sparse_dense_matmul(laplacian_tf, x)
 
 def fast_matting_laplacian(image, consts=None, epsilon=1e-5, window_radius=1):
+    r"""
+        Compute the matting laplacian matrix
+
+        Parameters
+        ----------
+        image:
+
+        consts:
+
+        epsilon:
+
+        window_radius:
+
+
+        Returns
+        -------
+        tf.Tensor -> tf.Tensor
+            operator M such that M(x) = Lx where L denotes the matting laplacian
+    """
     print("Compute matting laplacian started")
     dense = tf.eye(image.shape[0]*image.shape[1])
     zero = tf.constant(0, dtype=tf.float32)
     indices = tf.where(tf.not_equal(dense, zero))
     values = tf.gather_nd(dense, indices)
-    return tf.SparseTensor(indices, values, dense.shape)
+    # return lambda x: tf.sparse.sparse_dense_matmul(tf.SparseTensor(indices, values, dense.shape), x)
+    return lambda x: batch_sparse_matmul(tf.SparseTensor(indices, values, dense.shape), x)
+
+def batch_sparse_matmul(M, x):
+    f = lambda v: tf.sparse.sparse_dense_matmul(M, v)
+    return tf.map_fn(f, x)

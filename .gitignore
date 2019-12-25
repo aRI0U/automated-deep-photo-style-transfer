@@ -1,3 +1,8 @@
 seg.py
+*.jpg
+*.png
+experiments
+logs
 raw_seg
 weights
+**/__pycache__
