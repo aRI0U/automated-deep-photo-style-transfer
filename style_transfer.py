@@ -4,8 +4,8 @@ import os
 
 import cv2
 import numpy as np
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
+import tensorflow as tf
+
 from PIL import Image
 
 import components.NIMA.model as nima
@@ -22,22 +22,22 @@ def style_transfer(content_image, style_image, content_masks, style_masks, init_
 
     weight_restorer = vgg.load_weights()
 
-    image_placeholder = tf.placeholder(tf.float32, shape=[1, None, None, 3])
+    image_placeholder = tf.compat.v1.placeholder(tf.float32, shape=[1, None, None, 3])
     vgg19 = vgg.VGG19ConvSub(image_placeholder)
 
-    with tf.Session() as sess:
+    with tf.compat.v1.Session() as sess:
         transfer_image = tf.Variable(init_image)
         transfer_image_vgg = vgg.preprocess(transfer_image)
         transfer_image_nima = nima.preprocess(transfer_image)
 
-        sess.run(tf.global_variables_initializer())
+        sess.run(tf.compat.v1.global_variables_initializer())
         weight_restorer.init(sess)
         content_conv4_2 = sess.run(fetches=vgg19.conv4_2, feed_dict={image_placeholder: content_image})
         style_conv1_1, style_conv2_1, style_conv3_1, style_conv4_1, style_conv5_1 = sess.run(
             fetches=[vgg19.conv1_1, vgg19.conv2_1, vgg19.conv3_1, vgg19.conv4_1, vgg19.conv5_1],
             feed_dict={image_placeholder: style_image})
 
-        with tf.variable_scope("", reuse=True):
+        with tf.compat.v1.variable_scope("", reuse=True):
             vgg19 = vgg.VGG19ConvSub(transfer_image_vgg)
 
         content_loss = calculate_layer_content_loss(content_conv4_2, vgg19.conv4_2)
@@ -59,20 +59,20 @@ def style_transfer(content_image, style_image, content_masks, style_masks, init_
 
         total_loss = content_loss + style_loss + photorealism_regularization + nima_loss
 
-        tf.summary.scalar('Content loss', content_loss)
-        tf.summary.scalar('Style loss', style_loss)
-        tf.summary.scalar('Photorealism Regularization', photorealism_regularization)
-        tf.summary.scalar('NIMA loss', nima_loss)
-        tf.summary.scalar('Total loss', total_loss)
+        tf.compat.v1.summary.scalar('Content loss', content_loss)
+        tf.compat.v1.summary.scalar('Style loss', style_loss)
+        tf.compat.v1.summary.scalar('Photorealism Regularization', photorealism_regularization)
+        tf.compat.v1.summary.scalar('NIMA loss', nima_loss)
+        tf.compat.v1.summary.scalar('Total loss', total_loss)
 
-        summary_op = tf.summary.merge_all()
-        summary_writer = tf.summary.FileWriter(os.path.join(os.path.dirname(__file__), 'logs/{}'.format(args.results_dir)),
+        summary_op = tf.compat.v1.summary.merge_all()
+        summary_writer = tf.compat.v1.summary.FileWriter(os.path.join(os.path.dirname(__file__), 'logs/{}'.format(args.results_dir)),
                                                sess.graph)
 
         iterations_dir = os.path.join(args.results_dir, "iterations")
         os.mkdir(iterations_dir)
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=args.adam_learning_rate, beta1=args.adam_beta1,
+        optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=args.adam_learning_rate, beta1=args.adam_beta1,
                                            beta2=args.adam_beta2, epsilon=args.adam_epsilon)
 
         train_op = optimizer.minimize(total_loss, var_list=[transfer_image])
@@ -110,7 +110,7 @@ def adam_variables_initializer(adam_opt, var_list):
                  for name in adam_opt.get_slot_names()
                  for var in var_list if var is not None]
     adam_vars.extend(list(adam_opt._get_beta_accumulators()))
-    return tf.variables_initializer(adam_vars)
+    return tf.compat.v1.variables_initializer(adam_vars)
 
 
 def compute_nima_loss(image):
@@ -119,7 +119,7 @@ def compute_nima_loss(image):
     def mean_score(scores):
         scores = tf.squeeze(scores)
         si = tf.range(1, 11, dtype=tf.float32)
-        return tf.reduce_sum(tf.multiply(si, scores), name='nima_score')
+        return tf.reduce_sum(input_tensor=tf.multiply(si, scores), name='nima_score')
 
     nima_score = mean_score(model.output)
 
@@ -128,7 +128,7 @@ def compute_nima_loss(image):
 
 
 def calculate_layer_content_loss(content_layer, transfer_layer):
-    return tf.reduce_mean(tf.squared_difference(content_layer, transfer_layer))
+    return tf.reduce_mean(input_tensor=tf.math.squared_difference(content_layer, transfer_layer))
 
 
 def calculate_layer_style_loss(style_layer, transfer_layer, content_masks, style_masks):
@@ -137,7 +137,7 @@ def calculate_layer_style_loss(style_layer, transfer_layer, content_masks, style
     style_size = tf.TensorShape(style_layer.shape[1:3])
 
     def resize_masks(masks, size):
-        return [tf.image.resize_bilinear(mask, size) for mask in masks]
+        return [tf.image.resize(mask, size, method=tf.image.ResizeMethod.BILINEAR) for mask in masks]
 
     style_masks = resize_masks(style_masks, style_size)
     content_masks = resize_masks(content_masks, content_size)
@@ -150,10 +150,10 @@ def calculate_layer_style_loss(style_layer, transfer_layer, content_masks, style
         transfer_gram_matrix = calculate_gram_matrix(transfer_layer, content_mask)
         style_gram_matrix = calculate_gram_matrix(style_layer, style_mask)
 
-        mean = tf.reduce_mean(tf.squared_difference(style_gram_matrix, transfer_gram_matrix))
+        mean = tf.reduce_mean(input_tensor=tf.math.squared_difference(style_gram_matrix, transfer_gram_matrix))
         means_per_channel.append(mean / (2 * tf.square(feature_map_count) * tf.square(feature_map_size)))
 
-    style_loss = tf.reduce_sum(means_per_channel)
+    style_loss = tf.reduce_sum(input_tensor=means_per_channel)
 
     return style_loss
 
@@ -174,12 +174,12 @@ def calculate_photorealism_regularization(output, content_image, matting_method)
     # compute photorealism regularization loss
     regularization_channels = []
     for output_channel in tf.unstack(output, axis=-1):
-        channel_vector = tf.reshape(tf.transpose(output_channel), shape=[-1])
-        matmul_right = tf.sparse_tensor_dense_matmul(matting, tf.expand_dims(channel_vector, -1))
+        channel_vector = tf.reshape(tf.transpose(a=output_channel), shape=[-1])
+        matmul_right = tf.sparse.sparse_dense_matmul(matting, tf.expand_dims(channel_vector, -1))
         matmul_left = tf.matmul(tf.expand_dims(channel_vector, 0), matmul_right)
         regularization_channels.append(matmul_left)
 
-    regularization = tf.reduce_sum(regularization_channels)
+    regularization = tf.reduce_sum(input_tensor=regularization_channels)
     return regularization
 
 
