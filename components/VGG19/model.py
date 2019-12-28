@@ -19,7 +19,10 @@ Subset of the VGG19 model with all convolution layers, trained on ImageNet
 VGG_MEAN = [103.939, 116.779, 123.68]
 
 
-def preprocess(image):
+def preprocess(image, to_tensor=False):
+    # TODO: make clean architecture to be able to always convert to tensor
+    if to_tensor:
+        image = tf.cast(image, dtype=tf.float32)
     return image[:, :, :, ::-1] - VGG_MEAN
 
 

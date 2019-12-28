@@ -93,11 +93,11 @@ def fast_matting_laplacian(image, epsilon=1e-5, window_radius=1):
         tf.Tensor -> tf.Tensor
             operator M such that M(x) = Lx where L denotes the matting laplacian
     """
-    print("Compute matting laplacian started")
+    # print("Compute matting laplacian started")
     def L(p, image=image, epsilon=epsilon, window_radius=window_radius):
         # type: tf.Tensor[H*W] -> tf.Tensor[H*W]
         # TODO: make clean tf2 st no need to add .as_list()
-        H, W, C = image.shape.as_list()
+        H, W, C = image.shape
         image = tf.expand_dims(image, 3)
         p = tf.reshape(p, (H,W,1,1))
 
@@ -140,9 +140,9 @@ def fast_matting_laplacian(image, epsilon=1e-5, window_radius=1):
     # return lambda v: tf.map_fn(L, v)
 
     # dummy
-    return tf.function(lambda x: x)
+    return lambda x: x
 
-@tf.function
+#@tf.function
 def integral_image(img, axis=None):
     # type: tf.Tensor -> tf.Tensor
     iimg = tf.identity(img)
@@ -154,7 +154,7 @@ def integral_image(img, axis=None):
 def _flatten(tensor):
     return tf.reshape(tensor, (-1,))
 
-@tf.function
+#@tf.function
 def _window_stats(iimg, prod_iimg, center, radius):
     # xmin, ymin = tf.math.maximum(center-radius-1, -1)
     zero = tf.constant(0, dtype=iimg.dtype, shape=iimg[0,0].shape)
