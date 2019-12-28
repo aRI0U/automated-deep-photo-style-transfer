@@ -1,7 +1,9 @@
 import numpy as np
+
 import scipy.ndimage
 import scipy.sparse
 import scipy.sparse.linalg
+
 import tensorflow as tf
 
 
@@ -66,20 +68,25 @@ def matting_laplacian(image, consts=None, epsilon=1e-5, window_radius=1):
 
     return lambda x: tf.sparse.sparse_dense_matmul(laplacian_tf, x)
 
-def fast_matting_laplacian(image, consts=None, epsilon=1e-5, window_radius=1):
+
+
+
+
+
+
+def fast_matting_laplacian(image, epsilon=1e-5, window_radius=1):
     r"""
-        Compute the matting laplacian matrix
+        Compute the matting laplacian matrix using method described in:
+        Fast Matting Using Large Kernel Matting Laplacian Matrices, He et al.
 
         Parameters
         ----------
-        image:
-
-        consts:
-
-        epsilon:
-
+        image: tf.Tensor
+            (H,W,C) image
+        epsilon: float
+            regularization parameter
         window_radius:
-
+            radius of the window
 
         Returns
         -------
@@ -87,12 +94,138 @@ def fast_matting_laplacian(image, consts=None, epsilon=1e-5, window_radius=1):
             operator M such that M(x) = Lx where L denotes the matting laplacian
     """
     print("Compute matting laplacian started")
-    dense = tf.eye(image.shape[0]*image.shape[1])
-    zero = tf.constant(0, dtype=tf.float32)
-    indices = tf.where(tf.not_equal(dense, zero))
-    values = tf.gather_nd(dense, indices)
-    # return lambda x: tf.sparse.sparse_dense_matmul(tf.SparseTensor(indices, values, dense.shape), x)
-    return lambda x: batch_sparse_matmul(tf.SparseTensor(indices, values, dense.shape), x)
+    def L(p, image=image, epsilon=epsilon, window_radius=window_radius):
+        # type: tf.Tensor[H*W] -> tf.Tensor[H*W]
+        # TODO: make clean tf2 st no need to add .as_list()
+        H, W, C = image.shape.as_list()
+        image = tf.expand_dims(image, 3)
+        p = tf.reshape(p, (H,W,1,1))
+
+        # compute integral images
+        iimg = integral_image(image, axis=[0,1])
+        prod_img = image @ tf.transpose(image, perm=(0,1,3,2))
+        prod_iimg = integral_image(prod_img, axis=[0,1])
+        idx = tf.range(H*W)
+        indices = tf.stack((idx//W, idx%W), axis=-1)
+
+        # compute stats of image
+        mu, n, sigma = windows_stats(iimg, prod_iimg, indices, window_radius, batch_shape=(H,W))
+        mu /= n
+
+        # compute other necessary quantities
+        ip_iimg = integral_image(image * p, axis=[0,1])
+        ip_mean = windows_stats(ip_iimg, None, indices, window_radius, batch_shape=(H,W))[0]/n
+
+        p_bar = windows_stats(integral_image(p, axis=[0,1]), None, indices, window_radius, batch_shape=(H,W))[0]/n
+
+        delta = sigma + epsilon/n * tf.eye(C, batch_shape=(H,W))
+        delta_inv = tf.linalg.inv(delta)
+
+        a_star = delta_inv @ (ip_mean - mu * p_bar)
+        b_star = p_bar - tf.transpose(a_star, perm=(0,1,3,2)) @ mu
+
+        a_star_sum, _ = windows_stats(
+            integral_image(a_star, axis=[0,1]),
+            None, indices, window_radius, batch_shape=(H,W)
+        )
+        b_star_sum, _ = windows_stats(
+            integral_image(b_star, axis=[0,1]),
+            None, indices, window_radius, batch_shape=(H,W)
+        )
+
+        Lp = n*p - (tf.transpose(a_star_sum, perm=(0,1,3,2)) @ image + b_star_sum)
+
+        return _flatten(Lp)
+
+    # return lambda v: tf.map_fn(L, v)
+
+    # dummy
+    return tf.function(lambda x: x)
+
+@tf.function
+def integral_image(img, axis=None):
+    # type: tf.Tensor -> tf.Tensor
+    iimg = tf.identity(img)
+    axis = range(img.ndim) if axis is None else axis
+    for i in axis:
+        iimg = tf.cumsum(iimg, axis=i)
+    return iimg
+
+def _flatten(tensor):
+    return tf.reshape(tensor, (-1,))
+
+@tf.function
+def _window_stats(iimg, prod_iimg, center, radius):
+    # xmin, ymin = tf.math.maximum(center-radius-1, -1)
+    zero = tf.constant(0, dtype=iimg.dtype, shape=iimg[0,0].shape)
+    top_left = tf.maximum(center-radius-1, -1)
+    xmin, ymin = top_left[0], top_left[1]
+    bottom_right = tf.minimum(center+radius+1, iimg.shape[:2])
+    xmax, ymax = bottom_right[0]-1, bottom_right[1]-1
+
+    tl = iimg[xmin,ymin] if tf.minimum(xmin,ymin) >= 0 else zero
+    bl = iimg[xmax,ymin] if tf.minimum(xmax,ymin) >= 0 else zero
+    tr = iimg[xmin,ymax] if tf.minimum(xmin,ymax) >= 0 else zero
+    br = iimg[xmax,ymax] if tf.minimum(xmax,ymax) >= 0 else zero
+    n = _flatten(tf.cast((xmax-xmin)*(ymax-ymin), iimg.dtype))
+    mu = _flatten(br + tl - bl - tr)
+    if prod_iimg is None:
+        return tf.concat((mu, n), axis=0)
+
+    tl_prod = prod_iimg[xmin,ymin] if tf.minimum(xmin,ymin) >= 0 else zero
+    bl_prod = prod_iimg[xmax,ymin] if tf.minimum(xmax,ymin) >= 0 else zero
+    tr_prod = prod_iimg[xmin,ymax] if tf.minimum(xmin,ymax) >= 0 else zero
+    br_prod = prod_iimg[xmax,ymax] if tf.minimum(xmax,ymax) >= 0 else zero
+
+    sigma = _flatten((
+        br_prod + tl_prod - bl_prod - tr_prod \
+        - (tf.expand_dims(mu, 1) @ tf.expand_dims(mu, 0))/n
+    )/(n-1))
+
+    return tf.concat((mu, n, sigma), axis=0)
+
+def windows_stats(iimg, prod_iimg, centers, radius, batch_shape=(-1,)):
+    r"""
+        Integral image based fast construction of mean and covariance matrix.
+        See https://www.merl.com/publications/docs/TR2006-043.pdf for details.
+
+        Parameters
+        ----------
+        iimg: tf.Tensor(shape=(H,W,C,1), dtype='a)
+            integral image
+        prod_iimg: tf.Tensor(shape=(H,W,C,C), dtype='a)
+            integral image of product channels
+        centers: tf.Tensor(shape=(...,2), dtype=int32)
+            coordinates of the centers of the windows
+        radius: int or tf.Tensor
+            radius of the window. Must have shape of center or shape 1.
+        batch_shape: tuple
+
+        Returns
+        -------
+        mu: tf.Tensor(shape=(...,C,1), dtype='a)
+            sum of the image pixels in the window
+        n: tf.Tensor(shape=(...,1,1), dtype='a)
+            size of the window
+        sigma: tf.Tensor(shape=(...,C,C), dtype='a)
+            covariance matrix of the image pixels in the window
+    """
+    f = lambda c: _window_stats(iimg, prod_iimg, c, radius)
+    stats = tf.map_fn(f, centers, dtype=iimg.dtype)
+    C = iimg.shape[2]
+
+    if prod_iimg is None:
+        return (
+            tf.reshape(stats[...,:C], batch_shape+(C,1)),   # mu
+            tf.reshape(stats[...,C], batch_shape+(1,1)),    # n
+        )
+    return (
+        tf.reshape(stats[...,:C], batch_shape+(C,1)),   # mu
+        tf.reshape(stats[...,C], batch_shape+(1,1)),    # n
+        tf.reshape(stats[...,C+1:], batch_shape+(C,C))  # sigma
+    )
+
+
 
 def batch_sparse_matmul(M, x):
     f = lambda v: tf.sparse.sparse_dense_matmul(M, v)

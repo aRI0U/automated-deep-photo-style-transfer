@@ -15,6 +15,22 @@ from components.semantic_merge import merge_segments, reduce_dict, mask_for_tf, 
 
 
 def style_transfer(content_image, style_image, content_masks, style_masks, init_image, args):
+    r"""
+        Syle transfer computation
+
+        Parameters
+        ----------
+        content_image:
+        style_image:
+        content_masks:
+        style_masks:
+        init_image:
+        args:
+
+        Returns
+        -------
+        tf.Tensor
+    """
     print("Style transfer started")
 
     content_image = vgg.preprocess(content_image)
@@ -37,6 +53,7 @@ def style_transfer(content_image, style_image, content_masks, style_masks, init_
             fetches=[vgg19.conv1_1, vgg19.conv2_1, vgg19.conv3_1, vgg19.conv4_1, vgg19.conv5_1],
             feed_dict={image_placeholder: style_image})
 
+
         with tf.compat.v1.variable_scope("", reuse=True):
             vgg19 = vgg.VGG19ConvSub(transfer_image_vgg)
 
@@ -48,6 +65,8 @@ def style_transfer(content_image, style_image, content_masks, style_masks, init_
         style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv4_1, vgg19.conv4_1, content_masks, style_masks)
         style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv5_1, vgg19.conv5_1, content_masks, style_masks)
 
+        # TODO: convert to tensor sooner and understand placeholders and stuff like that
+        # photorealism_regularization = calculate_photorealism_regularization(transfer_image_vgg, tf.cast(content_image, dtype=tf.float32), args.matting)
         photorealism_regularization = calculate_photorealism_regularization(transfer_image_vgg, content_image, args.matting)
 
         nima_loss = compute_nima_loss(transfer_image_nima)
@@ -173,7 +192,8 @@ def calculate_photorealism_regularization(output, content_image, matting_method)
 
     # compute photorealism regularization loss
     v = tf.reshape(tf.transpose(output), (output.shape[-1], -1))
-    regularization_channels = tf.expand_dims(v,1) @ matting(tf.expand_dims(v,2))
+
+    regularization_channels = tf.expand_dims(v,1) @ tf.expand_dims(matting(v), 2)
 
     regularization = tf.reduce_sum(input_tensor=regularization_channels)
     return regularization
