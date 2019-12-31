@@ -120,9 +120,9 @@ class MattingLaplacian:
 
             Parameters
             ----------
-            iimg: tf.Tensor(shape=(H,W,C,1), dtype='a)
+            iimg: tf.Tensor(shape=(H,W,C,1), dtype=tf.float32)
                 integral image
-            prod_iimg: tf.Tensor(shape=(H,W,C,C), dtype='a)
+            prod_iimg: tf.Tensor(shape=(H,W,C,C), dtype=tf.float32)
                 integral image of product channels
             centers: tf.Tensor(shape=(...,2), dtype=int32)
                 coordinates of the centers of the windows
@@ -133,11 +133,11 @@ class MattingLaplacian:
 
             Returns
             -------
-            mu: tf.Tensor(shape=(...,C,1), dtype='a)
+            mu: tf.Tensor(shape=(...,C,1), dtype=tf.float32)
                 sum of the image pixels in the window
-            n: tf.Tensor(shape=(...,1,1), dtype='a)
+            n: tf.Tensor(shape=(...,1,1), dtype=tf.float32)
                 size of the window
-            sigma: tf.Tensor(shape=(...,C,C), dtype='a)
+            sigma: tf.Tensor(shape=(...,C,C), dtype=tf.float32)
                 covariance matrix of the image pixels in the window
         """
         f = lambda c: self._window_stats(iimg, prod_iimg, c, radius)
@@ -187,33 +187,80 @@ class MattingLaplacian:
 
 if __name__ == '__main__':
     # tests
+    import unittest
+
     import tensorflow_probability as tfp
-    H, W, C = 24, 19, 3
-    radius = 1
-    image = tf.random.uniform((H, W, C))
-    matting = MattingLaplacian(image, epsilon=1e-2, window_radius=radius)
 
-    mu, n, sigma = matting.windows_stats(matting.image, matting.prod_image, matting.indices, matting.radius, batch_shape=(H,W))
+    class TestStatsMethods(unittest.TestCase):
+        def __init__(self, *args, **kwargs):
+            super(TestStatsMethods, self).__init__(*args, **kwargs)
+            self.H, self.W, self.C = 24, 19, 3
+            self.r = 5
+            self.image = tf.random.uniform((self.H, self.W, self.C))
 
-    tf.print(mu[0, 2])
-    v1 = image[0:radius+1,0:2+radius+1]
-    tf.print(tf.reduce_sum(v1, axis=[0,1]))
+            matting = MattingLaplacian(self.image, epsilon=1e-2, window_radius=self.r)
+            self.mu, self.n, self.sigma = matting.windows_stats(matting.iimg, matting.prod_iimg, matting.indices, self.r, batch_shape=(self.H, self.W))
 
-    tf.print(mu[16,12])
-    v2 = image[16-radius:16+radius+1,12-radius:12+radius+1]
-    tf.print(tf.reduce_sum(v2))
+            self.tolerance = 1e-5
 
+        def assertEq(self, t1, t2):
+            msg = 'pred: {}\ngt: {}\nerror={}'.format(str(t1.numpy()), str(t2.numpy()), tf.reduce_sum(tf.abs(t1-t2)).numpy())
+            self.assertTrue(tf.reduce_sum(tf.square(t1-t2)) < self.tolerance, msg=msg)
 
-    print('\n\n')
-    v3 = image[0:radius+1,:radius+1]
-    tf.print(v3)
-    tf.print(matting.iimg[:2,:2])
-    tf.print(mu[0,0])
-    tf.print(tf.reduce_sum(v3, axis=(0,1)))
-    print('\n\n')
+        def test_sum_topleft_corner(self):
+            v = self.image[0:self.r+1, 0:self.r+1]
+            pred = self.mu[0,0]
+            gt = self.compute_sum(v)
+            self.assertEq(pred, gt)
 
+        def test_sum_left_border(self):
+            v = self.image[0:self.r+1, 0:2+self.r+1]
+            pred = self.mu[0,2]
+            gt = self.compute_sum(v)
+            self.assertEq(pred, gt)
 
-    tf.print(sigma[0,2])
-    tf.print(tfp.stats.covariance(tf.reshape(v1, (-1,C)), tf.reshape(v1, (-1,C))))
-    tf.print(sigma[16,12])
-    tf.print(tfp.stats.covariance(tf.reshape(v2, (-1,C)), tf.reshape(v2, (-1,C))))
+        def test_sum_bottomright_corner(self):
+            v = self.image[-self.r-1:, -self.r-1:]
+            pred = self.mu[-1,-1]
+            gt = self.compute_sum(v)
+            self.assertEq(pred, gt)
+
+        def test_sum_center(self):
+            v = self.image[16-self.r:16+self.r+1, 12-self.r:12+self.r+1]
+            pred = self.mu[16,12]
+            gt = self.compute_sum(v)
+            self.assertEq(pred, gt)
+
+        def test_cov_topleft_corner(self):
+            v = self.image[0:self.r+1, 0:self.r+1]
+            pred = self.sigma[0,0]
+            gt = self.compute_cov(v)
+            self.assertEq(pred, gt)
+
+        def test_cov_left_border(self):
+            v = self.image[0:self.r+1, 0:2+self.r+1]
+            pred = self.sigma[0,2]
+            gt = self.compute_cov(v)
+            self.assertEq(pred, gt)
+
+        def test_cov_bottomright_corner(self):
+            v = self.image[-self.r-1:, -self.r-1:]
+            pred = self.sigma[-1,-1]
+            gt = self.compute_cov(v)
+            self.assertEq(pred, gt)
+
+        def test_cov_center(self):
+            v = self.image[16-self.r:16+self.r+1, 12-self.r:12+self.r+1]
+            pred = self.sigma[16,12]
+            gt = self.compute_cov(v)
+            self.assertEq(pred, gt)
+
+        @staticmethod
+        def compute_sum(tensor):
+            return tf.expand_dims(tf.reduce_sum(tensor, axis=(0,1)), 1)
+
+        @staticmethod
+        def compute_cov(tensor):
+            return tfp.stats.covariance(tf.reshape(tensor, (-1, 3)), tf.reshape(tensor, (-1,3)))
+
+    unittest.main()
