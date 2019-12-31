@@ -12,7 +12,7 @@ from PIL import Image
 from components.VGG19.model import StyleContentModel
 from components.segmentation import compute_segmentation
 from components.semantic_merge import merge_segments, reduce_dict, mask_for_tf, extract_segmentation_masks
-from components.util.loss import compute_loss
+from components.loss import Loss
 
 
 print(tf.__version__)
@@ -138,8 +138,8 @@ if __name__ == "__main__":
     param = parser.add_argument_group('Hyperparameters')
     misc = parser.add_argument_group('Miscellaneous')
 
-    base.add_argument("--content_image", type=str, help="content image path", default="bear.jpeg")
-    base.add_argument("--style_image", type=str, help="style image path", default="blanc.jpg")
+    base.add_argument("--content_image", type=str, help="content image path", default="blanc.jpg")
+    base.add_argument("--style_image", type=str, help="style image path", default="bear.jpeg")
     base.add_argument("--output_image", type=str, help="Output image path, default: result.jpg",
                         default="result.jpg")
 
@@ -166,10 +166,10 @@ if __name__ == "__main__":
                         default=1e2)
     param.add_argument("--regularization_weight", type=float,
                         help="Weight of the photorealism regularization.",
-                        default=10 ** 4)
+                        default=1e4)
     param.add_argument("--nima_weight", type=float,
                         help="Weight for nima loss.",
-                        default=10 ** 5)
+                        default=1e5)
     param.add_argument("--adam_lr", type=float,
                         help="Learning rate for the adam optimizer., default: 1.0",
                         default=1e-1)
@@ -279,14 +279,24 @@ if __name__ == "__main__":
 
     print("Style transfer started")
 
-
+    print('Intializing features extractor...', end='\t')
     content_layers = ['block4_conv2']
     style_layers = ['block%d_conv1' % (i+1) for i in range(5)]
 
     features_extractor = StyleContentModel(content_layers, style_layers, (None,None,3))
+    print('Done.')
 
     content_target = features_extractor(content_image)['content']
     style_target = features_extractor(style_image)['style']
+
+    compute_loss = Loss(
+        content_target,
+        style_target,
+        args,
+        mask_for_tf(content_segmentation_masks),
+        mask_for_tf(style_segmentation_masks)
+    )
+
 
     # TODO: summary cf tf1
 
@@ -322,12 +332,7 @@ if __name__ == "__main__":
             # photorealism_regularization = 0#args.regularization_weight * photorealism_regularization
             # nima_loss = 0#args.nima_weight * nima_loss
             # total_loss = content_loss + style_loss + photorealism_regularization + nima_loss
-            loss_dict = compute_loss(
-                (content_target, style_target),
-                outputs, args,
-                mask_for_tf(content_segmentation_masks),
-                mask_for_tf(style_segmentation_masks)
-            )
+            loss_dict = compute_loss(outputs)
 
         total_loss = loss_dict['Total loss']
         grad = tape.gradient(total_loss, image)
