@@ -3,8 +3,7 @@ import os
 import cv2
 import numpy as np
 import scipy.io as sio
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
+import tensorflow as tf
 
 from components.PSPNet.model import PSPNet50, load_color_label_dict
 from components.path import WEIGHTS_DIR
@@ -12,43 +11,37 @@ from components.path import WEIGHTS_DIR
 CROP_SIZE = [473, 473]
 
 
-def compute_segmentation(content_image_path, style_image_path):
+def compute_segmentation(*images_paths):
     print("Compute segmentation started")
 
-    with tf.Session(graph=tf.Graph()) as sess:
-        content_image = load_img(content_image_path)
-        style_image = load_img(style_image_path)
-
-        placeholder = tf.placeholder(tf.float32, shape=[1, None, None, 3])
+    with tf.compat.v1.Session(graph=tf.Graph()) as sess:
+        placeholder = tf.compat.v1.placeholder(tf.float32, shape=[1, None, None, 3])
         net = PSPNet50({'data': placeholder}, is_training=False, num_classes=150)
 
-        content_pred, content_pre = segmentation_pred(net, content_image)
-        style_pred, style_pre = segmentation_pred(net, style_image)
-
         # Init tf Session
-        init = tf.global_variables_initializer()
+        init = tf.compat.v1.global_variables_initializer()
 
         sess.run(init)
 
-        restore_var = tf.global_variables()
+        restore_var = tf.compat.v1.global_variables()
 
         checkpoint = tf.train.get_checkpoint_state(os.path.join(WEIGHTS_DIR, 'PSPNet/checkpoint'))
         if checkpoint and checkpoint.model_checkpoint_path:
-            loader = tf.train.Saver(var_list=restore_var)
+            loader = tf.compat.v1.train.Saver(var_list=restore_var)
             load(loader, sess, checkpoint.model_checkpoint_path)
         else:
             print('No checkpoint file found.')
 
-        content_pre_image = sess.run(content_pre)
-        style_pre_image = sess.run(style_pre)
+        segmentations = []
+        for image_path in images_paths:
+            image = load_img(image_path)
+            pred, pre = segmentation_pred(net, image)
+            pre_image = sess.run(pre)
+            segmentation_bgr = sess.run(pred, feed_dict={placeholder: pre_image})
+            segmentation = cv2.cvtColor(segmentation_bgr[0], cv2.COLOR_BGR2RGB)
+            segmentations.append(segmentation)
 
-        content_segmentation_bgr = sess.run(content_pred, feed_dict={placeholder: content_pre_image})
-        style_segmentation_bgr = sess.run(style_pred, feed_dict={placeholder: style_pre_image})
-
-        content_segmentation = cv2.cvtColor(content_segmentation_bgr[0], cv2.COLOR_BGR2RGB)
-        style_segmentation = cv2.cvtColor(style_segmentation_bgr[0], cv2.COLOR_BGR2RGB)
-
-        return content_segmentation, style_segmentation
+        return segmentations
 
 
 def segmentation_pred(net, image):
@@ -57,16 +50,16 @@ def segmentation_pred(net, image):
     """
     num_classes = 150
 
-    image_shape = tf.shape(image)
+    image_shape = tf.shape(input=image)
     height = tf.maximum(CROP_SIZE[0], image_shape[0])
     width = tf.maximum(CROP_SIZE[1], image_shape[1])
 
     raw_output = net.layers['conv6']
 
     # Predictions
-    raw_output_up = tf.image.resize_bilinear(raw_output, size=[height, width], align_corners=True)
+    raw_output_up = tf.image.resize(raw_output, size=[height, width], method=tf.image.ResizeMethod.BILINEAR)
     raw_output_up = tf.image.crop_to_bounding_box(raw_output_up, 0, 0, image_shape[0], image_shape[1])
-    raw_output_up = tf.argmax(raw_output_up, axis=3)
+    raw_output_up = tf.argmax(input=raw_output_up, axis=3)
 
     color_table = list(load_color_label_dict().keys())
     color_mat = tf.constant(color_table, dtype=tf.float32)
@@ -92,9 +85,9 @@ def load_img(img_path):
     ext = filename.split('.')[-1]
 
     if ext.lower() == 'png':
-        return tf.image.decode_png(tf.read_file(img_path), channels=3)
-    elif ext.lower() in ['jpg','jpeg']:
-        return tf.image.decode_jpeg(tf.read_file(img_path), channels=3)
+        return tf.image.decode_png(tf.io.read_file(img_path), channels=3)
+    elif ext.lower() == 'jpg':
+        return tf.image.decode_jpeg(tf.io.read_file(img_path), channels=3)
     else:
         print('cannot process {0} file.'.format(filename))
         exit(0)
@@ -108,7 +101,7 @@ def preprocess(image, height, width):
     image -= IMG_MEAN
 
     pad_img = tf.image.pad_to_bounding_box(image, 0, 0, height, width)
-    pad_img = tf.expand_dims(pad_img, dim=0)
+    pad_img = tf.expand_dims(pad_img, axis=0)
 
     return pad_img
 

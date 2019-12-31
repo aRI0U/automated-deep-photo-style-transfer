@@ -8,120 +8,15 @@ import tensorflow as tf
 
 from PIL import Image
 
-import components.NIMA.model as nima
-import components.VGG19.model as vgg
+# import components.NIMA.model as nima
+from components.VGG19.model import StyleContentModel
 from components.segmentation import compute_segmentation
 from components.semantic_merge import merge_segments, reduce_dict, mask_for_tf, extract_segmentation_masks
+from components.util.loss import compute_loss
 
 
-def style_transfer(content_image, style_image, content_masks, style_masks, init_image, args):
-    r"""
-        Syle transfer computation
-
-        Parameters
-        ----------
-        content_image:
-        style_image:
-        content_masks:
-        style_masks:
-        init_image:
-        args:
-
-        Returns
-        -------
-        tf.Tensor
-    """
-    print("Style transfer started")
-
-    content_image = vgg.preprocess(content_image)
-    style_image = vgg.preprocess(style_image)
-
-    weight_restorer = vgg.load_weights()
-
-    image_placeholder = tf.compat.v1.placeholder(tf.float32, shape=[1, None, None, 3])
-    vgg19 = vgg.VGG19ConvSub(image_placeholder)
-
-    with tf.compat.v1.Session() as sess:
-        transfer_image = tf.Variable(init_image)
-        transfer_image_vgg = vgg.preprocess(transfer_image)
-        transfer_image_nima = nima.preprocess(transfer_image)
-
-        sess.run(tf.compat.v1.global_variables_initializer())
-        weight_restorer.init(sess)
-        content_conv4_2 = sess.run(fetches=vgg19.conv4_2, feed_dict={image_placeholder: content_image})
-        style_conv1_1, style_conv2_1, style_conv3_1, style_conv4_1, style_conv5_1 = sess.run(
-            fetches=[vgg19.conv1_1, vgg19.conv2_1, vgg19.conv3_1, vgg19.conv4_1, vgg19.conv5_1],
-            feed_dict={image_placeholder: style_image})
-
-
-        with tf.compat.v1.variable_scope("", reuse=True):
-            vgg19 = vgg.VGG19ConvSub(transfer_image_vgg)
-
-        content_loss = calculate_layer_content_loss(content_conv4_2, vgg19.conv4_2)
-
-        style_loss = (1. / 5.) * calculate_layer_style_loss(style_conv1_1, vgg19.conv1_1, content_masks, style_masks)
-        style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv2_1, vgg19.conv2_1, content_masks, style_masks)
-        style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv3_1, vgg19.conv3_1, content_masks, style_masks)
-        style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv4_1, vgg19.conv4_1, content_masks, style_masks)
-        style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv5_1, vgg19.conv5_1, content_masks, style_masks)
-
-        # TODO: convert to tensor sooner and understand placeholders and stuff like that
-        # photorealism_regularization = calculate_photorealism_regularization(transfer_image_vgg, tf.cast(content_image, dtype=tf.float32), args.matting)
-        photorealism_regularization = calculate_photorealism_regularization(transfer_image_vgg, content_image, args.matting)
-
-        nima_loss = compute_nima_loss(transfer_image_nima)
-
-        content_loss = args.content_weight * content_loss
-        style_loss = args.style_weight * style_loss
-        photorealism_regularization = args.regularization_weight * photorealism_regularization
-        nima_loss = args.nima_weight * nima_loss
-
-        total_loss = content_loss + style_loss + photorealism_regularization + nima_loss
-
-        tf.compat.v1.summary.scalar('Content loss', content_loss)
-        tf.compat.v1.summary.scalar('Style loss', style_loss)
-        tf.compat.v1.summary.scalar('Photorealism Regularization', photorealism_regularization)
-        tf.compat.v1.summary.scalar('NIMA loss', nima_loss)
-        tf.compat.v1.summary.scalar('Total loss', total_loss)
-
-        summary_op = tf.compat.v1.summary.merge_all()
-        summary_writer = tf.compat.v1.summary.FileWriter(os.path.join(os.path.dirname(__file__), 'logs/{}'.format(args.results_dir)),
-                                               sess.graph)
-
-        iterations_dir = os.path.join(args.results_dir, "iterations")
-        os.mkdir(iterations_dir)
-
-        optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=args.adam_learning_rate, beta1=args.adam_beta1,
-                                           beta2=args.adam_beta2, epsilon=args.adam_epsilon)
-
-        train_op = optimizer.minimize(total_loss, var_list=[transfer_image])
-        sess.run(adam_variables_initializer(optimizer, [transfer_image]))
-
-        min_loss, best_image = float("inf"), None
-        for i in range(1, args.iter + 1):
-            _, result_image, loss, c_loss, s_loss, p_loss, n_loss, summary = sess.run(
-                fetches=[train_op, transfer_image, total_loss, content_loss, style_loss, photorealism_regularization,
-                         nima_loss, summary_op])
-
-            summary_writer.add_summary(summary, i)
-
-            if i % args.print_loss_interval == 0:
-                print(
-                    "Iteration: {0:5}\t"
-                    "Total loss: {1:10.2f}\t"
-                    "Content loss: {2:10.2f}\t"
-                    "Style loss: {3:10.2f}\t "
-                    "Photorealism Regularization: {4:10.2f}\t"
-                    "NIMA loss: {5:10.2f}".format(i, loss, c_loss, s_loss, p_loss, n_loss)
-                )
-
-            if loss < min_loss:
-                min_loss, best_image = loss, result_image
-
-            if i % args.intermediate_result_interval == 0:
-                save_image(best_image, os.path.join(iterations_dir, "iter_{}.png".format(i)))
-
-        return best_image
+print(tf.__version__)
+print(tf.executing_eagerly())
 
 
 def adam_variables_initializer(adam_opt, var_list):
@@ -131,50 +26,6 @@ def adam_variables_initializer(adam_opt, var_list):
     adam_vars.extend(list(adam_opt._get_beta_accumulators()))
     return tf.compat.v1.variables_initializer(adam_vars)
 
-
-def compute_nima_loss(image):
-    model = nima.get_nima_model(image)
-
-    def mean_score(scores):
-        scores = tf.squeeze(scores)
-        si = tf.range(1, 11, dtype=tf.float32)
-        return tf.reduce_sum(input_tensor=tf.multiply(si, scores), name='nima_score')
-
-    nima_score = mean_score(model.output)
-
-    nima_loss = tf.identity(10.0 - nima_score, name='nima_loss')
-    return nima_loss
-
-
-def calculate_layer_content_loss(content_layer, transfer_layer):
-    return tf.reduce_mean(input_tensor=tf.math.squared_difference(content_layer, transfer_layer))
-
-
-def calculate_layer_style_loss(style_layer, transfer_layer, content_masks, style_masks):
-    # scale masks to current layer
-    content_size = tf.TensorShape(transfer_layer.shape[1:3])
-    style_size = tf.TensorShape(style_layer.shape[1:3])
-
-    def resize_masks(masks, size):
-        return [tf.image.resize(mask, size, method=tf.image.ResizeMethod.BILINEAR) for mask in masks]
-
-    style_masks = resize_masks(style_masks, style_size)
-    content_masks = resize_masks(content_masks, content_size)
-
-    feature_map_count = np.float32(transfer_layer.shape[3].value)
-    feature_map_size = np.float32(transfer_layer.shape[1].value) * np.float32(transfer_layer.shape[2].value)
-
-    means_per_channel = []
-    for content_mask, style_mask in zip(content_masks, style_masks):
-        transfer_gram_matrix = calculate_gram_matrix(transfer_layer, content_mask)
-        style_gram_matrix = calculate_gram_matrix(style_layer, style_mask)
-
-        mean = tf.reduce_mean(input_tensor=tf.math.squared_difference(style_gram_matrix, transfer_gram_matrix))
-        means_per_channel.append(mean / (2 * tf.square(feature_map_count) * tf.square(feature_map_size)))
-
-    style_loss = tf.reduce_sum(input_tensor=means_per_channel)
-
-    return style_loss
 
 
 def calculate_photorealism_regularization(output, content_image, matting_method):
@@ -199,26 +50,42 @@ def calculate_photorealism_regularization(output, content_image, matting_method)
     return regularization
 
 
-def calculate_gram_matrix(convolution_layer, mask):
-    matrix = tf.reshape(convolution_layer, shape=[-1, convolution_layer.shape[3]])
-    mask_reshaped = tf.reshape(mask, shape=[matrix.shape[0], 1])
-    matrix_masked = matrix * mask_reshaped
-    return tf.matmul(matrix_masked, matrix_masked, transpose_a=True)
+
 
 
 def load_image(filename):
-    image = np.array(Image.open(filename).convert("RGB"), dtype=np.float32)
-    image = np.expand_dims(image, axis=0)
+    image_string = tf.io.read_file(filename)
+    image_decoded = tf.cond(
+        tf.image.is_jpeg(image_string),
+        lambda: tf.image.decode_jpeg(image_string, channels=3),
+        lambda: tf.image.decode_png(image_string, channels=3)
+    )
+    image = tf.image.convert_image_dtype(image_decoded, tf.float32)
+    # image = Image.open(filename)
+    # image = tf.cast(image, dtype=tf.float32)
+    image = tf.expand_dims(image, 0)
     return image
+
+def load_dim(filename):
+    img = Image.open(filename)
+    return (1,) + np.asarray(img).shape
 
 
 def save_image(image, filename):
-    image = image[0, :, :, :]
-    image = np.clip(image, 0, 255.0)
-    image = np.uint8(image)
+    # print(image)
+    tf.io.write_file(filename, image)
 
-    result = Image.fromarray(image)
-    result.save(filename)
+def tensor_to_image(tensor):
+    r"""
+        Taken from https://www.tensorflow.org/tutorials/generative/style_transfer
+    """
+    # tensor = np.array(tensor, dtype=np.uint8)
+    # image = image[0, :, :, :]
+    # image = np.clip(image, 0, 255)
+    #
+    # return Image.fromarray(image)
+    image = tf.squeeze(tf.cast(255*tensor, dtype=tf.uint8))
+    return tf.image.encode_png(image)
 
 
 def change_filename(dir_name, filename, suffix, extension=None):
@@ -251,7 +118,7 @@ def write_metadata(args, load_segmentation):
         "similarity_metric": args.similarity_metric,
         "load_segmentation": load_segmentation,
         "adam": {
-            "learning_rate": args.adam_learning_rate,
+            "learning_rate": args.adam_lr,
             "beta1": args.adam_beta1,
             "beta2": args.adam_beta2,
             "epsilon": args.adam_epsilon
@@ -263,6 +130,7 @@ def write_metadata(args, load_segmentation):
 
 
 if __name__ == "__main__":
+
     """Parse program arguments"""
     parser = argparse.ArgumentParser()
     base = parser.add_argument_group('Base options')
@@ -279,7 +147,7 @@ if __name__ == "__main__":
                         choices=["noise", "content", "style"],
                         default="content")
     expr.add_argument("--iter", type=int, help="Number of iterations, default: 4000",
-                        default=4000)
+                        default=1000)
     expr.add_argument("--matting", type=str,
                         help="Method to compute matting laplacian., default: fast",
                         choices=["fast", "naive"],
@@ -295,16 +163,16 @@ if __name__ == "__main__":
                         default=1)
     param.add_argument("--style_weight", type=float,
                         help="Weight of the style loss., default: 100",
-                        default=100)
+                        default=1e2)
     param.add_argument("--regularization_weight", type=float,
                         help="Weight of the photorealism regularization.",
                         default=10 ** 4)
     param.add_argument("--nima_weight", type=float,
                         help="Weight for nima loss.",
                         default=10 ** 5)
-    param.add_argument("--adam_learning_rate", type=float,
+    param.add_argument("--adam_lr", type=float,
                         help="Learning rate for the adam optimizer., default: 1.0",
-                        default=1.0)
+                        default=1e-1)
     param.add_argument("--adam_beta1", type=float,
                         help="Beta1 for the adam optimizer., default: 0.9",
                         default=0.9)
@@ -325,7 +193,7 @@ if __name__ == "__main__":
                         default='raw_seg')
     misc.add_argument("--intermediate_result_interval", type=int,
                         help="Interval of iterations until a intermediate result is saved., default: 100",
-                        default=50)
+                        default=20)
     misc.add_argument("--print_loss_interval", type=int,
                         help="Interval of iterations until the current loss is printed to console., default: 1",
                         default=10)
@@ -367,7 +235,6 @@ if __name__ == "__main__":
         style_segmentation_image = cv2.imread(style_segmentation_filename)
         content_segmentation_masks = extract_segmentation_masks(content_segmentation_image)
         style_segmentation_masks = extract_segmentation_masks(style_segmentation_image)
-
     # otherwise compute it
     else:
         print("Create segmentation.")
@@ -389,13 +256,103 @@ if __name__ == "__main__":
         random_noise = np.random.randn(*content_image.shape).astype(np.float32)
         init_image = vgg.postprocess(random_noise * random_noise_scaling_factor).astype(np.float32)
     elif args.init == "content":
-        init_image = content_image
+        init_image = load_image(args.content_image)
     elif args.init == "style":
-        init_image = style_image
+        init_image = load_image(args.style_image)
     else:
         print("Init image parameter {} unknown.".format(args.init))
         exit(1)
 
-    result = style_transfer(content_image, style_image, mask_for_tf(content_segmentation_masks),
-                            mask_for_tf(style_segmentation_masks), init_image, args)
-    save_image(result, os.path.join(args.results_dir, "final_transfer_image.png"))
+    iterations_dir = os.path.join(args.results_dir, "iterations")
+    os.makedirs(iterations_dir, exist_ok=True)
+
+
+
+
+
+    ##################################
+
+    #####     STYLE TRANSFER     #####
+
+    ##################################
+
+
+    print("Style transfer started")
+
+
+    content_layers = ['block4_conv2']
+    style_layers = ['block%d_conv1' % (i+1) for i in range(5)]
+
+    features_extractor = StyleContentModel(content_layers, style_layers, (None,None,3))
+
+    content_target = features_extractor(content_image)['content']
+    style_target = features_extractor(style_image)['style']
+
+    # TODO: summary cf tf1
+
+    optimizer = tf.optimizers.Adam(
+        learning_rate=args.adam_lr,
+        beta_1=args.adam_beta1,
+        beta_2=args.adam_beta2,
+        epsilon=args.adam_epsilon
+    )
+
+    # TODO: init_image instead of content_image
+    transfer_image = tf.Variable(content_image, trainable=True, shape=load_dim(args.content_image))
+
+    @tf.function
+    def train_step(image):
+        with tf.GradientTape() as tape:
+            outputs = features_extractor(image)
+
+            # # compute loss
+            # content_loss = calculate_layer_content_loss(content_target, content_output)
+            #
+            # # # TODO: compute in parallel
+            # # style_loss = tf.constant(0.)
+            # # for orig, pred, w in zip(orig_style, pred_style, 5*[1/5]):
+            # #     style_loss += w * calculate_layer_style_loss(orig, pred, content_masks, style_masks)
+            #
+            # # photorealism_regularization = calculate_photorealism_regularization(transfer_image, content_image, args.matting)
+            #
+            # # nima_loss = compute_nima_loss(transfer_image_nima)
+            #
+            # content_loss = args.content_weight * content_loss
+            # style_loss = 0#args.style_weight * style_loss
+            # photorealism_regularization = 0#args.regularization_weight * photorealism_regularization
+            # nima_loss = 0#args.nima_weight * nima_loss
+            # total_loss = content_loss + style_loss + photorealism_regularization + nima_loss
+            loss_dict = compute_loss(
+                (content_target, style_target),
+                outputs, args,
+                mask_for_tf(content_segmentation_masks),
+                mask_for_tf(style_segmentation_masks)
+            )
+
+        total_loss = loss_dict['Total loss']
+        grad = tape.gradient(total_loss, image)
+        optimizer.apply_gradients([(grad, image)])
+        image.assign(tf.clip_by_value(image, 0, 1))
+        return loss_dict
+
+    min_loss = float('inf')
+    best_image = None
+
+
+    for i in range(1, args.iter + 1):
+        # summary_writer.add_summary(summary, i)
+        loss_dict = train_step(transfer_image)
+
+        if i % args.print_loss_interval == 0:
+            tf.print("Iteration: {:5}".format(i), end='\t')
+            for key in loss_dict:
+                tf.print('{}:'.format(key), loss_dict[key], end='\t')
+            tf.print()
+        #
+        if loss_dict['Total loss'].numpy() < min_loss:
+            min_loss, best_image = loss_dict['Total loss'], tensor_to_image(transfer_image)
+        #
+        if i % args.intermediate_result_interval == 0:
+            save_image(best_image, os.path.join(iterations_dir, "iter_{}.png".format(i)))
+
+        # save_image(result, os.path.join(args.results_dir, "final_transfer_image.png"))

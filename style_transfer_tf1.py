@@ -5,16 +5,13 @@ import os
 import cv2
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.applications.vgg19 import VGG19
 
 from PIL import Image
 
 import components.NIMA.model as nima
 import components.VGG19.model as vgg
-# import components.util.loss as loss
 from components.segmentation import compute_segmentation
 from components.semantic_merge import merge_segments, reduce_dict, mask_for_tf, extract_segmentation_masks
-
 
 def style_transfer(content_image, style_image, content_masks, style_masks, init_image, args):
     r"""
@@ -35,136 +32,97 @@ def style_transfer(content_image, style_image, content_masks, style_masks, init_
     """
     print("Style transfer started")
 
-    content_image = vgg.preprocess(content_image, True)
-    style_image = vgg.preprocess(style_image, True)
+    content_image = vgg.preprocess(content_image)
+    style_image = vgg.preprocess(style_image)
 
-    # weight_restorer = vgg.load_weights()
+    weight_restorer = vgg.load_weights()
 
-    # image_placeholder = tf.compat.v1.placeholder(tf.float32, shape=[1, None, None, 3])
+    image_placeholder = tf.compat.v1.placeholder(tf.float32, shape=[1, None, None, 3])
+    vgg19 = vgg.VGG19ConvSub(image_placeholder)
 
-    # with tf.compat.v1.Session() as sess:
-    # transfer_image = tf.Variable(init_image)
-    #
-    #
-    # transfer_image_vgg = vgg.preprocess(transfer_image)
-    # transfer_image_nima = nima.preprocess(transfer_image)
+    with tf.compat.v1.Session() as sess:
+        transfer_image = tf.Variable(init_image)
+        transfer_image_vgg = vgg.preprocess(transfer_image)
+        transfer_image_nima = nima.preprocess(transfer_image)
 
-    # vgg19 = vgg.VGG19ConvSub(image_placeholder)
-    vgg19 = VGG19(
-        include_top=False,
-        weights='imagenet',
-        input_shape=(None,None,3),
-        pooling='max'
-    )
-
-    # sess.run(tf.compat.v1.global_variables_initializer())
-    # weight_restorer.init(sess)
-
-    content_outputs = [vgg19.get_layer('block4_conv2').output]
-    style_outputs = [vgg19.get_layer('block%d_conv1'% (i+1)).output for i in range(5)]
-    model = tf.keras.Model(inputs=vgg19.input, outputs=content_outputs + style_outputs)
-    model.trainable = False
-    feature_extractor = lambda img: split_output(model(img))
-
-    orig_content = feature_extractor(content_image)[0]
-    orig_style = feature_extractor(style_image)[1]
-
-    # content_conv4_2 = sess.run(fetches=vgg19.conv4_2, feed_dict={image_placeholder: content_image})
-    # style_conv1_1, style_conv2_1, style_conv3_1, style_conv4_1, style_conv5_1 = sess.run(
-    #     fetches=[vgg19.conv1_1, vgg19.conv2_1, vgg19.conv3_1, vgg19.conv4_1, vgg19.conv5_1],
-    #     feed_dict={image_placeholder: style_image})
-
-    # with tf.compat.v1.variable_scope("", reuse=True):
-    #     vgg19 = vgg.VGG19ConvSub(transfer_image_vgg)
+        sess.run(tf.compat.v1.global_variables_initializer())
+        weight_restorer.init(sess)
+        content_conv4_2 = sess.run(fetches=vgg19.conv4_2, feed_dict={image_placeholder: content_image})
+        style_conv1_1, style_conv2_1, style_conv3_1, style_conv4_1, style_conv5_1 = sess.run(
+            fetches=[vgg19.conv1_1, vgg19.conv2_1, vgg19.conv3_1, vgg19.conv4_1, vgg19.conv5_1],
+            feed_dict={image_placeholder: style_image})
 
 
-    # # summary
-    # TODO: handle summary
-    # tf.compat.v1.summary.scalar('Content loss', content_loss)
-    # tf.compat.v1.summary.scalar('Style loss', style_loss)
-    # tf.compat.v1.summary.scalar('Photorealism Regularization', photorealism_regularization)
-    # tf.compat.v1.summary.scalar('NIMA loss', nima_loss)
-    # tf.compat.v1.summary.scalar('Total loss', total_loss)
-    #
-    # summary_op = tf.compat.v1.summary.merge_all()
-    # summary_writer = tf.compat.v1.summary.FileWriter(os.path.join(os.path.dirname(__file__), 'logs/{}'.format(args.results_dir)),
-    #                                        sess.graph)
+        with tf.compat.v1.variable_scope("", reuse=True):
+            vgg19 = vgg.VGG19ConvSub(transfer_image_vgg)
 
-    iterations_dir = os.path.join(args.results_dir, "iterations")
-    os.makedirs(iterations_dir)
+        print(content_conv4_2, vgg19.conv4_2)
+        print(type(content_conv4_2), type(vgg19.conv4_2))
+        content_loss = calculate_layer_content_loss(content_conv4_2, vgg19.conv4_2)
 
-    # optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=args.adam_learning_rate, beta1=args.adam_beta1,
-    #                                    beta2=args.adam_beta2, epsilon=args.adam_epsilon)
-    #
-    # train_op = optimizer.minimize(total_loss, var_list=[transfer_image])
-    # sess.run(adam_variables_initializer(optimizer, [transfer_image]))
+        style_loss = (1. / 5.) * calculate_layer_style_loss(style_conv1_1, vgg19.conv1_1, content_masks, style_masks)
+        style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv2_1, vgg19.conv2_1, content_masks, style_masks)
+        style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv3_1, vgg19.conv3_1, content_masks, style_masks)
+        style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv4_1, vgg19.conv4_1, content_masks, style_masks)
+        style_loss += (1. / 5.) * calculate_layer_style_loss(style_conv5_1, vgg19.conv5_1, content_masks, style_masks)
 
-    optimizer = tf.optimizers.Adam(
-        learning_rate=args.adam_lr,
-        beta_1=args.adam_beta1,
-        beta_2=args.adam_beta2,
-        epsilon=args.adam_epsilon
-    )
+        # TODO: convert to tensor sooner and understand placeholders and stuff like that
+        # photorealism_regularization = calculate_photorealism_regularization(transfer_image_vgg, tf.cast(content_image, dtype=tf.float32), args.matting)
+        photorealism_regularization = calculate_photorealism_regularization(transfer_image_vgg, content_image, args.matting)
 
-    transfer_image = tf.Variable(vgg.preprocess(init_image, True), trainable=True)
+        nima_loss = compute_nima_loss(transfer_image_nima)
 
-    min_loss, best_image = float("inf"), None
+        content_loss = args.content_weight * content_loss
+        style_loss = args.style_weight * style_loss
+        photorealism_regularization = args.regularization_weight * photorealism_regularization
+        nima_loss = args.nima_weight * nima_loss
 
-    @tf.function
-    def train_step(image):
-        with tf.GradientTape() as tape:
-            pred_content, pred_style = feature_extractor(transfer_image)
+        total_loss = content_loss + style_loss + photorealism_regularization + nima_loss
 
-            # compute loss
-            content_loss = calculate_layer_content_loss(orig_content, pred_content)
+        tf.compat.v1.summary.scalar('Content loss', content_loss)
+        tf.compat.v1.summary.scalar('Style loss', style_loss)
+        tf.compat.v1.summary.scalar('Photorealism Regularization', photorealism_regularization)
+        tf.compat.v1.summary.scalar('NIMA loss', nima_loss)
+        tf.compat.v1.summary.scalar('Total loss', total_loss)
 
-            # TODO: compute in parallel
-            style_loss = tf.constant(0.)
-            for orig, pred, w in zip(orig_style, pred_style, 5*[1/5]):
-                style_loss += w * calculate_layer_style_loss(orig, pred, content_masks, style_masks)
+        summary_op = tf.compat.v1.summary.merge_all()
+        summary_writer = tf.compat.v1.summary.FileWriter(os.path.join(os.path.dirname(__file__), 'logs/{}'.format(args.results_dir)),
+                                               sess.graph)
 
-            photorealism_regularization = calculate_photorealism_regularization(transfer_image, content_image, args.matting)
+        iterations_dir = os.path.join(args.results_dir, "iterations")
+        os.mkdir(iterations_dir)
 
-            # nima_loss = compute_nima_loss(transfer_image_nima)
+        optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=args.adam_learning_rate, beta1=args.adam_beta1,
+                                           beta2=args.adam_beta2, epsilon=args.adam_epsilon)
 
-            content_loss = args.content_weight * content_loss
-            style_loss = args.style_weight * style_loss
-            photorealism_regularization = args.regularization_weight * photorealism_regularization
-            nima_loss = 0#args.nima_weight * nima_loss
-            total_loss = content_loss + style_loss + photorealism_regularization + nima_loss
+        train_op = optimizer.minimize(total_loss, var_list=[transfer_image])
+        sess.run(adam_variables_initializer(optimizer, [transfer_image]))
 
-        loss = {
-            'Total loss': total_loss,
-            'Content loss': content_loss,
-            'Style loss': style_loss,
-            'Photorealism Regularization': photorealism_regularization,
-        }
+        min_loss, best_image = float("inf"), None
+        for i in range(1, args.iter + 1):
+            _, result_image, loss, c_loss, s_loss, p_loss, n_loss, summary = sess.run(
+                fetches=[train_op, transfer_image, total_loss, content_loss, style_loss, photorealism_regularization,
+                         nima_loss, summary_op])
 
-        return loss, tape.gradient(total_loss, transfer_image)
+            summary_writer.add_summary(summary, i)
 
-    for i in range(1, args.iter + 1):
-        # _, result_image, loss, c_loss, s_loss, p_loss, n_loss, summary = sess.run(
-        #     fetches=[train_op, transfer_image, total_loss, content_loss, style_loss, photorealism_regularization,
-        #              nima_loss, summary_op])
-        #
-        # summary_writer.add_summary(summary, i)
-        loss_dict, grad = train_step(transfer_image)
-        optimizer.apply_gradients([(grad,transfer_image)])
-        transfer_image.assign(tf.clip_by_value(transfer_image, 0, 255))
+            if i % args.print_loss_interval == 0:
+                print(
+                    "Iteration: {0:5}\t"
+                    "Total loss: {1:10.2f}\t"
+                    "Content loss: {2:10.2f}\t"
+                    "Style loss: {3:10.2f}\t "
+                    "Photorealism Regularization: {4:10.2f}\t"
+                    "NIMA loss: {5:10.2f}".format(i, loss, c_loss, s_loss, p_loss, n_loss)
+                )
 
-        if i % args.print_loss_interval == 0:
-            print("Iteration: {:5}".format(i), end='\t')
-            # for key in loss_dict:
-            #     tf.print("{0}: {1:10.2f}".format(key,loss_dict[key].eval()), end='\t')
-            print()
+            if loss < min_loss:
+                min_loss, best_image = loss, result_image
 
-        # if loss_dict['Total loss'].eval() < min_loss:
-        #     min_loss, best_image = loss, result_image
-        #
-        # if i % args.intermediate_result_interval == 0:
-        #     save_image(best_image, os.path.join(iterations_dir, "iter_{}.png".format(i)))
+            if i % args.intermediate_result_interval == 0:
+                save_image(best_image, os.path.join(iterations_dir, "iter_{}.png".format(i)))
 
-    return best_image
+        return best_image
 
 
 def adam_variables_initializer(adam_opt, var_list):
@@ -263,12 +221,6 @@ def save_image(image, filename):
     result = Image.fromarray(image)
     result.save(filename)
 
-def split_output(output):
-    r"""
-        Divides the output list into the content output and style output
-    """
-    return output[0], output[1:]
-
 
 def change_filename(dir_name, filename, suffix, extension=None):
     r"""
@@ -300,7 +252,7 @@ def write_metadata(args, load_segmentation):
         "similarity_metric": args.similarity_metric,
         "load_segmentation": load_segmentation,
         "adam": {
-            "learning_rate": args.adam_lr,
+            "learning_rate": args.adam_learning_rate,
             "beta1": args.adam_beta1,
             "beta2": args.adam_beta2,
             "epsilon": args.adam_epsilon
@@ -351,7 +303,7 @@ if __name__ == "__main__":
     param.add_argument("--nima_weight", type=float,
                         help="Weight for nima loss.",
                         default=10 ** 5)
-    param.add_argument("--adam_lr", type=float,
+    param.add_argument("--adam_learning_rate", type=float,
                         help="Learning rate for the adam optimizer., default: 1.0",
                         default=1.0)
     param.add_argument("--adam_beta1", type=float,
@@ -447,4 +399,4 @@ if __name__ == "__main__":
 
     result = style_transfer(content_image, style_image, mask_for_tf(content_segmentation_masks),
                             mask_for_tf(style_segmentation_masks), init_image, args)
-    # save_image(result, os.path.join(args.results_dir, "final_transfer_image.png"))
+    save_image(result, os.path.join(args.results_dir, "final_transfer_image.png"))
