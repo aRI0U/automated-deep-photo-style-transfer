@@ -61,8 +61,6 @@ def load_image(filename):
         lambda: tf.image.decode_png(image_string, channels=3)
     )
     image = tf.image.convert_image_dtype(image_decoded, tf.float32)
-    # image = Image.open(filename)
-    # image = tf.cast(image, dtype=tf.float32)
     image = tf.expand_dims(image, 0)
     return image
 
@@ -72,7 +70,6 @@ def load_dim(filename):
 
 
 def save_image(image, filename):
-    # print(image)
     tf.io.write_file(filename, image)
 
 def tensor_to_image(tensor):
@@ -138,9 +135,9 @@ if __name__ == "__main__":
     param = parser.add_argument_group('Hyperparameters')
     misc = parser.add_argument_group('Miscellaneous')
 
-    base.add_argument("--content_image", type=str, help="content image path", default="blanc.jpg")
-    base.add_argument("--style_image", type=str, help="style image path", default="bear.jpeg")
-    base.add_argument("--output_image", type=str, help="Output image path, default: result.jpg",
+    base.add_argument("-c", "--content_image", type=str, help="content image path", default="blanc.jpg")
+    base.add_argument("-s", "--style_image", type=str, help="style image path", default="bear.jpeg")
+    base.add_argument("-o", "--output_image", type=str, help="Output image path, default: result.jpg",
                         default="result.jpg")
 
     expr.add_argument("--init", type=str, help="Initialization image., default: content",
@@ -148,16 +145,13 @@ if __name__ == "__main__":
                         default="content")
     expr.add_argument("--iter", type=int, help="Number of iterations, default: 4000",
                         default=1000)
-    expr.add_argument("--matting", type=str,
-                        help="Method to compute matting laplacian., default: fast",
-                        choices=["fast", "naive"],
-                        default="fast")
     expr.add_argument("--similarity_metric", type=str,
                         help="Semantic similarity metric for label grouping., default: li",
                         choices=["li", "wpath", "jcn", "lin", "wup", "res"],
                         default="li")
     # For more information on the similarity metrics: http://gsi-upm.github.io/sematch/similarity/#word-similarity
 
+    # weights
     param.add_argument("--content_weight", type=float,
                         help="Weight of the content loss., default: 1",
                         default=1)
@@ -170,6 +164,7 @@ if __name__ == "__main__":
     param.add_argument("--nima_weight", type=float,
                         help="Weight for nima loss.",
                         default=1e5)
+    # Adam parameters
     param.add_argument("--adam_lr", type=float,
                         help="Learning rate for the adam optimizer., default: 1.0",
                         default=1e-1)
@@ -182,11 +177,21 @@ if __name__ == "__main__":
     param.add_argument("--adam_epsilon", type=float,
                         help="Epsilon for the adam optimizer., default: 1e-08",
                         default=1e-08)
+    # matting laplacian matric parameters
+    param.add_argument("--matting_epsilon", type=float,
+                        help="Epsilon regularization for matting laplacian computing., default=1e-5",
+                        default=1e-5)
+    param.add_argument("--matting_window_radius", type=int,
+                        help="Size of the windows considered by matting laplacian., default=3",
+                        default=3)
     param.add_argument("--semantic_thresh", type=float, help="Semantic threshold for label grouping., default: 0.8",
                         default=0.8)
 
     misc.add_argument("--gpu", type=str, help="comma separated list of GPU(s) to use.",
                         default="0")
+    misc.add_argument("--matting_dir", type=str,
+                        help="Where matting laplacians are stored, set to None to never save., default: './matting'",
+                        default='matting')
     misc.add_argument("--results_dir", type=str, help='where results are stored., default: ./experiments/result_<timestamp>',
                         default=None)
     misc.add_argument("--seg_dir", type=str, help='where segmented images are stored., default: ./raw_seg',
@@ -210,7 +215,6 @@ if __name__ == "__main__":
     os.makedirs(args.results_dir, exist_ok=True)
 
     os.makedirs(args.seg_dir, exist_ok=True)
-
 
     # check if manual segmentation masks are available
     content_segmentation_filename = change_filename(args.seg_dir, args.content_image, '_seg', '.png')
@@ -279,7 +283,7 @@ if __name__ == "__main__":
 
     print("Style transfer started")
 
-    print('Intializing features extractor...', end='\t')
+    print('Initializing features extractor...', end='\t', flush=True)
     content_layers = ['block4_conv2']
     style_layers = ['block%d_conv1' % (i+1) for i in range(5)]
 
@@ -297,6 +301,9 @@ if __name__ == "__main__":
         mask_for_tf(style_segmentation_masks)
     )
 
+    print('Initializing matting laplacian...', end='\t', flush=True)
+    compute_loss.initialize_matting_laplacian(tf.squeeze(content_image))
+    print('Done.')
 
     # TODO: summary cf tf1
 
@@ -314,14 +321,6 @@ if __name__ == "__main__":
     def train_step(image):
         with tf.GradientTape() as tape:
             outputs = features_extractor(image)
-
-            # # compute loss
-            # content_loss = calculate_layer_content_loss(content_target, content_output)
-            #
-            # # # TODO: compute in parallel
-            # # style_loss = tf.constant(0.)
-            # # for orig, pred, w in zip(orig_style, pred_style, 5*[1/5]):
-            # #     style_loss += w * calculate_layer_style_loss(orig, pred, content_masks, style_masks)
             #
             # # photorealism_regularization = calculate_photorealism_regularization(transfer_image, content_image, args.matting)
             #
@@ -332,7 +331,7 @@ if __name__ == "__main__":
             # photorealism_regularization = 0#args.regularization_weight * photorealism_regularization
             # nima_loss = 0#args.nima_weight * nima_loss
             # total_loss = content_loss + style_loss + photorealism_regularization + nima_loss
-            loss_dict = compute_loss(outputs)
+            loss_dict = compute_loss(image, outputs)
 
         total_loss = loss_dict['Total loss']
         grad = tape.gradient(total_loss, image)

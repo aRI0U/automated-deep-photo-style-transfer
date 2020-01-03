@@ -1,3 +1,6 @@
+from numpy import savez, load
+import os
+
 import tensorflow as tf
 
 class MattingLaplacian:
@@ -14,30 +17,44 @@ class MattingLaplacian:
         window_radius: int
             radius of the window
     """
-    def __init__(self, image, epsilon=1e-5, window_radius=1):
+    def __init__(self, image, epsilon=1e-5, window_radius=1, fname=None):
         # params
-        self.eps = epsilon
+        # self.eps = epsilon
         self.radius = window_radius
 
         self.shape = image.shape
         self.image = tf.expand_dims(image, 3)
-        self.prod_image = self.image @ tf.transpose(self.image, perm=(0,1,3,2))
-
-        # compute integral images
-        self.iimg = self.integral_image(self.image, axis=[0,1])
-        self.prod_iimg = self.integral_image(self.prod_image, axis=[0,1])
+        prod_image = self.image @ tf.transpose(self.image, perm=(0,1,3,2))
 
         # list of indices of picture
         H, W, C = self.shape
         idx = tf.range(H*W)
         self.indices = tf.stack((idx//W, idx%W), axis=1)
 
-        # compute stats
-        mu, n, sigma = self.windows_stats(self.iimg, self.prod_iimg, self.indices, self.radius, batch_shape=(H,W))
-        delta = sigma + epsilon/n * tf.eye(C, batch_shape=(H,W))
-        self.delta_inv = tf.linalg.inv(delta)
-        self.mu = mu/n
-        self.window_size = n
+        if fname is not None and os.path.isfile(fname):
+            # load stats from files
+            npzfile = load(fname, mmap_mode='r')
+            self.mu = tf.constant(npzfile['mu'], dtype=image.dtype)
+            self.window_size = tf.constant(npzfile['window_size'], dtype=image.dtype)
+            self.delta_inv = tf.constant(npzfile['delta_inv'], dtype=image.dtype)
+
+        else:
+            # compute integral images
+            iimg = self.integral_image(self.image, axis=[0,1])
+            prod_iimg = self.integral_image(prod_image, axis=[0,1])
+
+            # compute stats
+            mu, n, sigma = self.windows_stats(iimg, prod_iimg, self.indices, self.radius, batch_shape=(H,W))
+            delta = sigma + epsilon/n * tf.eye(C, batch_shape=(H,W))
+            self.delta_inv = tf.linalg.inv(delta)
+            self.mu = mu/n
+            self.window_size = n
+            if fname:
+                savez(fname,
+                    mu=self.mu.numpy(),
+                    window_size=self.window_size.numpy(),
+                    delta_inv=self.delta_inv.numpy()
+                )
 
 
     def L_operator(self, p):
@@ -51,14 +68,16 @@ class MattingLaplacian:
 
             Returns
             -------
-            tf.Tensor
+            tf.Tensor(shape=???, dtype=tf.float32)
                 matting laplacian matrix * p
         """
         H, W, C = self.shape
+        # TODO: see whether reshape could be done earlier
+        p = tf.reshape(p, (H,W,1,1))
 
         ip_iimg = self.integral_image(self.image * p, axis=[0,1])
-        ip_mean = self.windows_stats(ip_iimg, None, self.indices, self.radius, batch_shape=(H,W))
-
+        ip_mean = self.windows_stats(ip_iimg, None, self.indices, self.radius, batch_shape=(H,W))[0]
+        ip_mean /= self.window_size
         p_bar = self.windows_stats(self.integral_image(p, axis=[0,1]), None, self.indices, self.radius, batch_shape=(H,W))[0]
         p_bar /= self.window_size
 
@@ -74,12 +93,12 @@ class MattingLaplacian:
             None, self.indices, self.radius, batch_shape=(H,W)
         )[0]
 
-        Lp = self.window_size*p - (tf.transpose(a_star_sum, perm=(0,1,3,2)) @ image + b_star_sum)
+        Lp = self.window_size*p - (tf.transpose(a_star_sum, perm=(0,1,3,2)) @ self.image + b_star_sum)
 
         return self._flatten(Lp)
 
-
-    def __call__(v):
+    # TODO: parallel
+    def __call__(self, v):
         return tf.map_fn(self.L_operator, v)
 
 
@@ -160,7 +179,7 @@ class MattingLaplacian:
         # type: tf.Tensor -> tf.Tensor
         r"""
             Compute the integral image S, i.e. the array such that
-            $\forall i, j, S[i,j] = \sum_{i'<=i, j'<j} img[i',j']$
+            $\forall i, j, S[i,j] = \sum_{i'<=i, j'<=j} img[i',j']$
 
             Parameters
             ----------
@@ -185,10 +204,13 @@ class MattingLaplacian:
         return tf.reshape(tensor, (-1,))
 
 
-if __name__ == '__main__':
-    # tests
-    import unittest
 
+
+
+
+
+if __name__ == '__main__':
+    import unittest
     import tensorflow_probability as tfp
 
     class TestStatsMethods(unittest.TestCase):

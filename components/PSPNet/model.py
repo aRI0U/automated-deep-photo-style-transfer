@@ -3,7 +3,7 @@ import pickle
 import tensorflow as tf
 from os.path import join
 
-from components.path import WEIGHTS_DIR
+from components.util import WEIGHTS_DIR
 from .network import Network
 
 

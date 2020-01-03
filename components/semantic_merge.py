@@ -9,7 +9,7 @@ import tensorflow as tf
 from os.path import join
 
 from components.PSPNet.model import load_color_label_dict
-from components.path import WEIGHTS_DIR
+from components.util import WEIGHTS_DIR
 
 nltk.data.path.append(join(WEIGHTS_DIR, 'WordNet'))
 

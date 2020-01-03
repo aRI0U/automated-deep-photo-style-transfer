@@ -1,6 +1,10 @@
 import numpy as np
+import os
+import time
 
 import tensorflow as tf
+
+from components.matting import MattingLaplacian
 
 class Loss:
     r"""
@@ -12,41 +16,65 @@ class Loss:
         self.content_masks = content_masks
         self.style_masks = style_masks
 
-        self.loss_names = [
-            'Content loss',
-            'Style loss'
-        ]
-        self.loss_functions = [
-            self.iter_on_layers(self.calculate_layer_content_loss),
-            self.iter_on_layers(self.calculate_layer_style_loss)
-        ]
-        self.loss_weights = [
-            args.content_weight,
-            args.style_weight
-        ]
+        self.loss_names = {
+            'content': 'Content loss',
+            'style':   'Style loss',
+            'photo':   'Photorealism regualarization'
+        }
+        self.loss_functions = {
+            'content': self.iter_on_layers(self.calculate_layer_content_loss),
+            'style':   self.iter_on_layers(self.calculate_layer_style_loss),
+            'photo':   self.calculate_photorealism_regularization
+        }
+        self.loss_weights = {
+            'content': args.content_weight,
+            'style':   args.style_weight,
+            'photo':   args.regularization_weight
+        }
+        assert self.loss_names.keys() == self.loss_functions.keys() == self.loss_weights.keys()
+
+        self.matting_params = {
+            'epsilon': args.matting_epsilon,
+            'window_radius': args.matting_window_radius,
+        }
+
+        # TODO: put that stuff in main
+        if args.matting_dir:
+            root = os.path.join(
+                args.matting_dir,
+                str(args.matting_epsilon),
+                str(args.matting_window_radius)
+            )
+            os.makedirs(root, exist_ok=True)
+            self.matting_params['fname'] = os.path.join(root, os.path.splitext(args.content_image)[0]+'.npz')
+
+    def initialize_matting_laplacian(self, image):
+        self.matting_laplacian = MattingLaplacian(image, **self.matting_params)
+
+    def __call__(self, image, outputs):
+        return self.compute_loss(image, outputs)
 
 
-    def __call__(self, outputs):
-        return self.compute_loss(outputs)
 
-
-
-    def compute_loss(self, outputs):
+    def compute_loss(self, image, outputs):
         content_output, style_output = outputs['content'], outputs['style']
 
-        loss_values = []
+        loss_values = {}
 
-        calculate_content_loss = self.loss_functions[0]
-        loss_values.append(calculate_content_loss(self.content_target, content_output))
+        calculate_content_loss = self.loss_functions['content']
+        loss_values['content'] = calculate_content_loss(self.content_target, content_output)
 
-        calculate_style_loss = self.loss_functions[1]
-        loss_values.append(calculate_style_loss(self.style_target, style_output))
+        calculate_style_loss = self.loss_functions['style']
+        loss_values['style'] = calculate_style_loss(self.style_target, style_output)
+
+        calculate_photorealism_regularization = self.loss_functions['photo']
+        loss_values['photo'] = calculate_photorealism_regularization(image)
 
         # compute total loss
-        total_loss = tf.add_n([w*loss for w, loss in zip(self.loss_weights, loss_values)])
+        total_loss = tf.add_n([w*loss for loss, w in dict_zip(loss_values, self.loss_weights)])
 
         # fill dict
-        loss_dict = {key: value for key, value in zip(self.loss_names, loss_values)}
+        loss_dict = {name: loss for loss, name in dict_zip(loss_values, self.loss_names)}
         loss_dict['Total loss'] = total_loss
 
         return loss_dict
@@ -75,6 +103,7 @@ class Loss:
         return tf.matmul(matrix_masked, matrix_masked, transpose_a=True)
 
     def calculate_layer_style_loss(self, target, output):
+        # TODO: use only tf, no numpy
         # scale masks to current layer
         content_masks, style_masks = self.content_masks, self.style_masks
         output_size = output.shape[1:3]
@@ -123,4 +152,14 @@ class Loss:
         nima_loss = tf.identity(10.0 - nima_score, name='nima_loss')
         return nima_loss
 
+
     ### PHOTOREALISM REGULARIZATION
+    def calculate_photorealism_regularization(self, image):
+        v = tf.reshape(tf.transpose(image), (image.shape[-1], -1))
+        regularization_channels = tf.expand_dims(v, 1) @ tf.expand_dims(self.matting_laplacian(v), 2)
+        return tf.reduce_sum(input_tensor=regularization_channels)
+
+
+def dict_zip(*dicts):
+    for k in dicts[0].keys():
+        yield [d[k] for d in dicts]

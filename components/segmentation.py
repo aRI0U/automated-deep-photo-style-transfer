@@ -6,7 +6,7 @@ import scipy.io as sio
 import tensorflow as tf
 
 from components.PSPNet.model import PSPNet50, load_color_label_dict
-from components.path import WEIGHTS_DIR
+from components.util import WEIGHTS_DIR
 
 CROP_SIZE = [473, 473]
 
