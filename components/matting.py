@@ -56,24 +56,25 @@ class MattingLaplacian:
                     delta_inv=self.delta_inv.numpy()
                 )
 
-
+    @tf.function
     def L_operator(self, p):
         r"""
             Operator L such that L(p) = Mp where M denotes the matting laplacian matrix
 
             Parameters
             ----------
-            p: tf.Tensor(shape=???, dtype=tf.float32)
+            p: tf.Tensor(shape=(H,W,1), dtype=tf.float32)
                 input vector
 
             Returns
             -------
-            tf.Tensor(shape=???, dtype=tf.float32)
+            tf.Tensor(shape=(H,W,1), dtype=tf.float32)
                 matting laplacian matrix * p
         """
         H, W, C = self.shape
-        # TODO: see whether reshape could be done earlier
-        p = tf.reshape(p, (H,W,1,1))
+        # TODO: see if reshape could be done earlier
+        p = tf.expand_dims(p, -1)
+        # assert self.image.shape == p.shape, str(self.image.shape) + str(p.shape)
 
         ip_iimg = self.integral_image(self.image * p, axis=[0,1])
         ip_mean = self.windows_stats(ip_iimg, None, self.indices, self.radius, batch_shape=(H,W))[0]
@@ -94,15 +95,13 @@ class MattingLaplacian:
         )[0]
 
         Lp = self.window_size*p - (tf.transpose(a_star_sum, perm=(0,1,3,2)) @ self.image + b_star_sum)
-
-        return self._flatten(Lp)
+        return tf.squeeze(Lp, -1)
 
     # TODO: parallel
     def __call__(self, v):
         return tf.map_fn(self.L_operator, v)
 
 
-    @tf.function
     def _window_stats(self, iimg, prod_iimg, center, radius):
         zero = tf.constant(0, dtype=iimg.dtype, shape=iimg[0,0].shape)
         top_left = tf.maximum(center-radius-1, -1)
@@ -202,6 +201,11 @@ class MattingLaplacian:
     @staticmethod
     def _flatten(tensor):
         return tf.reshape(tensor, (-1,))
+
+    @staticmethod
+    @tf.function
+    def parallel_map(*args, **kwargs):
+        return tf.map_fn(*args, **kwargs)
 
 
 

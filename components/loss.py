@@ -155,10 +155,11 @@ class Loss:
 
     ### PHOTOREALISM REGULARIZATION
     def calculate_photorealism_regularization(self, image):
-        v = tf.reshape(tf.transpose(image), (image.shape[-1], -1))
-        regularization_channels = tf.expand_dims(v, 1) @ tf.expand_dims(self.matting_laplacian(v), 2)
-        return tf.reduce_sum(input_tensor=regularization_channels)
-
+        # image.shape = (1, H, W, C)
+        channels_first = tf.transpose(image, perm=(3, 1, 2, 0)) # (C, H, W, 1)
+        # regularization_channels = tf.expand_dims(v, 1) * tf.expand_dims(self.matting_laplacian(v), 2)
+        # return tf.reduce_sum(input_tensor=regularization_channels)
+        return tf.reduce_sum(channels_first * self.matting_laplacian(channels_first))
 
 def dict_zip(*dicts):
     for k in dicts[0].keys():
