@@ -47,6 +47,7 @@ class Loss:
             )
             os.makedirs(root, exist_ok=True)
             self.matting_params['fname'] = os.path.join(root, os.path.splitext(args.content_image)[0]+'.npz')
+        self.matting_laplacian = None
 
     def initialize_matting_laplacian(self, image):
         self.matting_laplacian = MattingLaplacian(image, **self.matting_params)
@@ -67,8 +68,9 @@ class Loss:
         calculate_style_loss = self.loss_functions['style']
         loss_values['style'] = calculate_style_loss(self.style_target, style_output)
 
-        calculate_photorealism_regularization = self.loss_functions['photo']
-        loss_values['photo'] = calculate_photorealism_regularization(image)
+        if self.loss_weights['photo'] > 0:
+            calculate_photorealism_regularization = self.loss_functions['photo']
+            loss_values['photo'] = calculate_photorealism_regularization(image)
 
         # compute total loss
         total_loss = tf.add_n([w*loss for loss, w in dict_zip(loss_values, self.loss_weights)])

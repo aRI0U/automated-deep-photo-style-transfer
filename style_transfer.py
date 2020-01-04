@@ -301,9 +301,10 @@ if __name__ == "__main__":
         mask_for_tf(style_segmentation_masks)
     )
 
-    print('Initializing matting laplacian...', end='\t', flush=True)
-    compute_loss.initialize_matting_laplacian(tf.squeeze(content_image))
-    print('Done.')
+    if args.regularization_weight > 0:
+        print('Initializing matting laplacian...', end='\t', flush=True)
+        compute_loss.initialize_matting_laplacian(tf.squeeze(content_image))
+        print('Done.')
 
     # TODO: summary cf tf1
 
