@@ -4,7 +4,7 @@ import time
 
 import tensorflow as tf
 
-from components.matting import MattingLaplacian
+from components.matting_v3 import MattingLaplacian
 
 class Loss:
     r"""
@@ -157,11 +157,10 @@ class Loss:
 
     ### PHOTOREALISM REGULARIZATION
     def calculate_photorealism_regularization(self, image):
-        # image.shape = (1, H, W, C)
-        channels_first = tf.transpose(image, perm=(3, 1, 2, 0)) # (C, H, W, 1)
-        # regularization_channels = tf.expand_dims(v, 1) * tf.expand_dims(self.matting_laplacian(v), 2)
-        # return tf.reduce_sum(input_tensor=regularization_channels)
-        return tf.reduce_sum(channels_first * self.matting_laplacian(channels_first))
+        # image.shape = (1, H, W, C
+        HW = self.matting_laplacian.shape[0]
+        p = tf.reshape(image, (HW, -1))
+        return tf.reduce_sum(p * self.matting_laplacian.matmul(p))
 
 def dict_zip(*dicts):
     for k in dicts[0].keys():
