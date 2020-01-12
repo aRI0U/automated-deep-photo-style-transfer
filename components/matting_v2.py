@@ -172,7 +172,7 @@ class MattingLaplacian(tf.linalg.LinearOperator):
         r = self.radius
 
         padding = lambda x: tf.image.pad_to_bounding_box(x, r+1, r+1, H+2*r+1, W+2*r+1)
-        tf.print(img.shape, r, H, W)
+        # tf.print(img.shape, r, H, W)
         pad_image = tf.cond(
             tf.rank(img) == 3,
             lambda: padding(img),

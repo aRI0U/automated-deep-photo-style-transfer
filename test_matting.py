@@ -2,8 +2,7 @@ import numpy as np
 import time
 import tensorflow as tf
 
-from components.matting_v3 import MattingLaplacian
-from components.matting_v2 import MattingLaplacian2
+from components.matting_v2 import MattingLaplacian
 
 H, W, C = 1080,720,3
 image = tf.random.uniform((H,W,C))
@@ -21,7 +20,7 @@ eps, r = 1e-5, 7
 # m1 = MattingLaplacian(image, epsilon=eps, window_radius=r)
 p = tf.reshape(image, (H*W,C))
 t = [time.time()]
-m2 = MattingLaplacian2(image, epsilon=eps, window_radius=r)
+m2 = MattingLaplacian(image, epsilon=eps, window_radius=r)
 t.append(time.time())
 Lp = m2.matmul(p)
 t.append(time.time())
