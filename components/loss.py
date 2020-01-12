@@ -124,8 +124,11 @@ class Loss:
             style_masks = [tf.constant(1., shape=target_size)]
             content_masks = [tf.constant(1., shape=output_size)]
 
-        feature_map_count = np.float32(output.shape[3])
-        feature_map_size = np.float32(output.shape[1]) * np.float32(output.shape[2])
+        # feature_map_count = np.float32(output.shape[3])
+        # feature_map_size = np.float32(output.shape[1]) * np.float32(output.shape[2])
+        _, H, W, C = output.shape
+        feature_map_size = tf.cast(H*W, output.dtype)
+        feature_map_count = tf.cast(C, output.dtype)
 
         means_per_channel = []
         for content_mask, style_mask in zip(content_masks, style_masks):
