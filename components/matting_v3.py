@@ -17,7 +17,7 @@ class MattingLaplacian(tf.linalg.LinearOperator):
 
         Parameters
         ----------
-        image: tf.Tensor(shape=(H,W,C), dtype=tf.float32)
+        image: tf.Tensor(shape=(H,W,C), dtype=self.dtype)
             input image
         epsilon: float
             regularization parameter

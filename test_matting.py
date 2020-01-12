@@ -4,7 +4,7 @@ import tensorflow as tf
 
 from components.matting_v2 import MattingLaplacian
 
-H, W, C = 1080,720,3
+H, W, C = 16,16,3
 image = tf.random.uniform((H,W,C))
 # image = tf.constant([
 #     [[2,2],[0,0],[1,1]],
@@ -36,11 +36,11 @@ print(t[1:] - t[:-1])
 # tf.print(L1)
 # print()
 # t1 = time.time()
-# L = m2.to_dense()
+L = m2.to_dense()
 # t2 = time.time()
 # print(t2-t1)
-# tf.print(L)
-# tf.print([L[i,i] for i in range(H*W)])
-# tf.print(tf.linalg.det(L))
+tf.print(L)
+tf.print([L[i,i] for i in range(H*W)])
+tf.print(tf.linalg.det(L))
 # tf.print(m2.matmul(cols[:,0]))
 # tf.print(m2.matmul(cols[:,1]))

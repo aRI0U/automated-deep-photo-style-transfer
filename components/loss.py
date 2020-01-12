@@ -99,6 +99,7 @@ class Loss:
     ### STYLE LOSS
     @staticmethod
     def calculate_gram_matrix(convolution_layer, mask):
+        mask = tf.cast(mask, dtype=convolution_layer.dtype)
         matrix = tf.reshape(convolution_layer, shape=[-1, convolution_layer.shape[3]])
         mask_reshaped = tf.reshape(mask, shape=[matrix.shape[0], 1])
         matrix_masked = matrix * mask_reshaped
@@ -131,10 +132,10 @@ class Loss:
             transfer_gram_matrix = self.calculate_gram_matrix(output, content_mask)
             style_gram_matrix = self.calculate_gram_matrix(target, style_mask)
 
-            mean = tf.reduce_mean(input_tensor=tf.math.squared_difference(style_gram_matrix, transfer_gram_matrix))
+            mean = tf.reduce_mean(tf.math.squared_difference(style_gram_matrix, transfer_gram_matrix))
             means_per_channel.append(mean / (2 * tf.square(feature_map_count) * tf.square(feature_map_size)))
 
-        style_loss = tf.reduce_sum(input_tensor=means_per_channel)
+        style_loss = tf.reduce_sum(means_per_channel)
 
         return style_loss
 
@@ -146,7 +147,7 @@ class Loss:
 
         def mean_score(scores):
             scores = tf.squeeze(scores)
-            si = tf.range(1, 11, dtype=tf.float32)
+            si = tf.range(1, 11, dtype=image.dtype)
             return tf.reduce_sum(input_tensor=tf.multiply(si, scores), name='nima_score')
 
         nima_score = mean_score(model.output)

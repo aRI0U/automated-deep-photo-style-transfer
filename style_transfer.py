@@ -53,14 +53,14 @@ def calculate_photorealism_regularization(output, content_image, matting_method)
 
 
 
-def load_image(filename):
+def load_image(filename, dtype):
     image_string = tf.io.read_file(filename)
     image_decoded = tf.cond(
         tf.image.is_jpeg(image_string),
         lambda: tf.image.decode_jpeg(image_string, channels=3),
         lambda: tf.image.decode_png(image_string, channels=3)
     )
-    image = tf.image.convert_image_dtype(image_decoded, tf.float32)
+    image = tf.image.convert_image_dtype(image_decoded, dtype)
     image = tf.expand_dims(image, 0)
     return image
 
@@ -140,6 +140,8 @@ if __name__ == "__main__":
     base.add_argument("-o", "--output_image", type=str, help="Output image path, default: result.jpg",
                         default="result.jpg")
 
+    expr.add_argument("--dtype", type=str, help="dtype of the input and output images., default: float32",
+                        default="float32")
     expr.add_argument("--init", type=str, help="Initialization image., default: content",
                         choices=["noise", "content", "style"],
                         default="content")
@@ -229,8 +231,11 @@ if __name__ == "__main__":
             print("Image file {} does not exist.".format(path))
             exit(1)
 
-    content_image = load_image(args.content_image)
-    style_image = load_image(args.style_image)
+
+    tf.keras.backend.set_floatx(args.dtype)
+
+    content_image = load_image(args.content_image, args.dtype)
+    style_image = load_image(args.style_image, args.dtype)
 
     # use existing if available
     if (load_segmentation):
@@ -260,9 +265,9 @@ if __name__ == "__main__":
         random_noise = np.random.randn(*content_image.shape).astype(np.float32)
         init_image = vgg.postprocess(random_noise * random_noise_scaling_factor).astype(np.float32)
     elif args.init == "content":
-        init_image = load_image(args.content_image)
+        init_image = load_image(args.content_image, args.dtype)
     elif args.init == "style":
-        init_image = load_image(args.style_image)
+        init_image = load_image(args.style_image, args.dtype)
     else:
         print("Init image parameter {} unknown.".format(args.init))
         exit(1)
@@ -287,7 +292,7 @@ if __name__ == "__main__":
     content_layers = ['block4_conv2']
     style_layers = ['block%d_conv1' % (i+1) for i in range(5)]
 
-    features_extractor = StyleContentModel(content_layers, style_layers, (None,None,3))
+    features_extractor = StyleContentModel(content_layers, style_layers, shape=(None,None,3))
     print('Done.')
 
     content_target = features_extractor(content_image)['content']

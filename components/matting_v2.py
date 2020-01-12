@@ -20,7 +20,7 @@ class MattingLaplacian(tf.linalg.LinearOperator):
         self.radius = window_radius
 
         self.size = image.shape
-        self.image = tf.expand_dims(self.add_border(image), 3)
+        self.image = self.add_border(tf.expand_dims(image, -1))
 
         # compute integral images
         iimg = self.integral_image(self.image)
@@ -131,13 +131,13 @@ class MattingLaplacian(tf.linalg.LinearOperator):
             # pprint(q)
             out[:,c1] = q.reshape(H*W)
 
-        return tf.constant(out, dtype=tf.float32)
+        return tf.constant(out, dtype=self.image.dtype)
 
-
+    @tf.function
     def _matmul(self, x, adjoint=False, adjoint_arg=False):
-        def pprint(a,b):
-            print(a)
-            tf.print(tf.squeeze(b))
+        # def pprint(a,b):
+        #     print(a)
+        #     tf.print(tf.squeeze(b))
         H, W, C = self.size
         p = self.add_border(tf.reshape(x, (H,W,-1,1)))
         p_mean = self.compute_sums(self.integral_image(p), normalize=True) # (H,W,C',1)
@@ -167,18 +167,24 @@ class MattingLaplacian(tf.linalg.LinearOperator):
 
     # add and crop borders to images to compute means over full windows
     def add_border(self, img):
-        tf.debugging.assert_rank_in(img, [3,4])
+        r"""
+            Add a zeros-border of width r around the image
+
+            Parameters
+            ----------
+            img: tf.Tensor(shape=(H,W,C,1), dtype=self.dtype)
+
+            Returns
+            -------
+            tf.Tensor(shape=(H+2*r+1,W+2*r+1,C,1), dtype=self.dtype)
+        """
         H, W, _ = self.size
         r = self.radius
 
         padding = lambda x: tf.image.pad_to_bounding_box(x, r+1, r+1, H+2*r+1, W+2*r+1)
-        # tf.print(img.shape, r, H, W)
-        pad_image = tf.cond(
-            tf.rank(img) == 3,
-            lambda: padding(img),
-            lambda: tf.transpose(padding(tf.transpose(img, perm=(3,0,1,2))), perm=(1,2,3,0))
-        )
-        return pad_image
+
+        return tf.transpose(padding(tf.transpose(img, perm=(3,0,1,2))), perm=(1,2,3,0))
+        # return pad_image
 
     def crop_border(self, img):
         H, W, _ = self.size
@@ -221,12 +227,12 @@ class MattingLaplacian(tf.linalg.LinearOperator):
 
             Parameters
             ----------
-            img: tf.Tensor(shape=(H,W,...), dtype=tf.float32)
+            img: tf.Tensor(shape=(H,W,...), dtype=self.dtype)
                 input image
 
             Returns
             -------
-            tf.Tensor(shape=(H,W,...), dtype=tf.float32)
+            tf.Tensor(shape=(H,W,...), dtype=self.dtype)
                 integral image
         """
         iimg = tf.identity(img)
