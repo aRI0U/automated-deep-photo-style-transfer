@@ -141,7 +141,7 @@ if __name__ == "__main__":
                         default="result.jpg")
 
     expr.add_argument("--dtype", type=str, help="dtype of the input and output images., default: float32",
-                        default="float32")
+                        default="float64")
     expr.add_argument("--init", type=str, help="Initialization image., default: content",
                         choices=["noise", "content", "style"],
                         default="content")
