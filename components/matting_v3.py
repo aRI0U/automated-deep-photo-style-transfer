@@ -84,8 +84,6 @@ class MattingLaplacian(tf.linalg.LinearOperator):
         win_inds = win_inds.reshape(c_h, c_w, win_size)
 
         win_inds = win_inds.reshape(-1, win_size)
-
-
         winI = ravelImg[win_inds]
 
         win_mu = np.mean(winI, axis=1, keepdims=True)

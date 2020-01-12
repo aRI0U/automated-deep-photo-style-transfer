@@ -4,7 +4,7 @@ import time
 
 import tensorflow as tf
 
-from components.matting_v3 import MattingLaplacian
+from components.matting_v2 import MattingLaplacian
 
 class Loss:
     r"""
@@ -158,7 +158,7 @@ class Loss:
     ### PHOTOREALISM REGULARIZATION
     def calculate_photorealism_regularization(self, image):
         # image.shape = (1, H, W, C
-        HW = self.matting_laplacian.shape[0]
+        HW = self.matting_laplacian.shape[-1]
         p = tf.reshape(image, (HW, -1))
         return tf.reduce_sum(p * self.matting_laplacian.matmul(p))
 
