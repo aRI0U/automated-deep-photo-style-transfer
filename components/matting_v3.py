@@ -13,7 +13,7 @@ import tensorflow as tf
 class MattingLaplacian(tf.linalg.LinearOperator):
     r"""
         Compute the matting laplacian matrix using method described in:
-        Fast Matting Using Large Kernel Matting Laplacian Matrices, He et al.
+        A closed-form solution to natural image matting, Levin et al.
 
         Parameters
         ----------

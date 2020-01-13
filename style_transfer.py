@@ -141,7 +141,7 @@ if __name__ == "__main__":
                         default="result.jpg")
 
     expr.add_argument("--dtype", type=str, help="dtype of the input and output images., default: float32",
-                        default="float64")
+                        default="float32")
     expr.add_argument("--init", type=str, help="Initialization image., default: content",
                         choices=["noise", "content", "style"],
                         default="content")
@@ -191,9 +191,6 @@ if __name__ == "__main__":
 
     misc.add_argument("--gpu", type=str, help="comma separated list of GPU(s) to use.",
                         default="0")
-    misc.add_argument("--matting_dir", type=str,
-                        help="Where matting laplacians are stored, set to None to never save., default: './matting'",
-                        default='matting')
     misc.add_argument("--results_dir", type=str, help='where results are stored., default: ./experiments/result_<timestamp>',
                         default=None)
     misc.add_argument("--seg_dir", type=str, help='where segmented images are stored., default: ./raw_seg',
@@ -308,7 +305,7 @@ if __name__ == "__main__":
 
     if args.regularization_weight > 0:
         print('Initializing matting laplacian...', end='\t', flush=True)
-        compute_loss.initialize_matting_laplacian(tf.squeeze(content_image))
+        compute_loss.initialize_matting_laplacian(tf.cast(tf.squeeze(content_image), tf.float64))
         print('Done.')
 
     # TODO: summary cf tf1
@@ -354,9 +351,9 @@ if __name__ == "__main__":
         loss_dict = train_step(transfer_image)
 
         if i % args.print_loss_interval == 0:
-            tf.print("Iteration: {:5}".format(i), end='\t')
+            tf.print("[Iter {}]".format(i), end='\t')
             for key in loss_dict:
-                tf.print('{}:'.format(key), loss_dict[key], end='\t')
+                tf.print('{}: {:<15.3f}'.format(key, loss_dict[key]), end='')
             tf.print()
         #
         if loss_dict['Total loss'].numpy() < min_loss:
