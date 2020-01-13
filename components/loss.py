@@ -1,9 +1,6 @@
-import numpy as np
-import os
-import time
-
 import tensorflow as tf
 
+from components.NIMA.model import NIMAModel
 from components.matting_v2 import MattingLaplacian
 
 class Loss:
@@ -19,34 +16,30 @@ class Loss:
         self.loss_names = {
             'content': 'Content loss',
             'style':   'Style loss',
+            'nima':    'NIMA loss',
             'photo':   'Photorealism regualarization'
         }
         self.loss_functions = {
             'content': self.iter_on_layers(self.calculate_layer_content_loss),
             'style':   self.iter_on_layers(self.calculate_layer_style_loss),
+            'nima':    self.compute_nima_loss,
             'photo':   self.calculate_photorealism_regularization
         }
         self.loss_weights = {
             'content': args.content_weight,
             'style':   args.style_weight,
+            'nima':    args.nima_weight,
             'photo':   args.regularization_weight
         }
         assert self.loss_names.keys() == self.loss_functions.keys() == self.loss_weights.keys()
+
+        self.nima_model = NIMAModel()
 
         self.matting_params = {
             'epsilon': args.matting_epsilon,
             'window_radius': args.matting_window_radius,
         }
 
-        # TODO: put that stuff in main
-        if args.matting_dir:
-            root = os.path.join(
-                args.matting_dir,
-                str(args.matting_epsilon),
-                str(args.matting_window_radius)
-            )
-            os.makedirs(root, exist_ok=True)
-            self.matting_params['fname'] = os.path.join(root, os.path.splitext(args.content_image)[0]+'.npz')
         self.matting_laplacian = None
 
     def initialize_matting_laplacian(self, image):
@@ -67,6 +60,9 @@ class Loss:
 
         calculate_style_loss = self.loss_functions['style']
         loss_values['style'] = calculate_style_loss(self.style_target, style_output)
+
+        calculate_nima_loss = self.loss_functions['nima']
+        loss_values['nima'] = calculate_nima_loss(image)
 
         if self.loss_weights['photo'] > 0:
             calculate_photorealism_regularization = self.loss_functions['photo']
@@ -131,6 +127,7 @@ class Loss:
         feature_map_count = tf.cast(C, output.dtype)
 
         means_per_channel = []
+
         for content_mask, style_mask in zip(content_masks, style_masks):
             transfer_gram_matrix = self.calculate_gram_matrix(output, content_mask)
             style_gram_matrix = self.calculate_gram_matrix(target, style_mask)
@@ -144,27 +141,27 @@ class Loss:
 
 
     ### NIMA LOSS
-    @staticmethod
-    def compute_nima_loss(image):
-        model = nima.get_nima_model(image)
+    def compute_nima_loss(self, image):
+        model = self.nima_model
 
         def mean_score(scores):
             scores = tf.squeeze(scores)
             si = tf.range(1, 11, dtype=image.dtype)
             return tf.reduce_sum(input_tensor=tf.multiply(si, scores), name='nima_score')
 
-        nima_score = mean_score(model.output)
+        nima_score = mean_score(model(image))
 
+        # return 10.0 - nima_score
         nima_loss = tf.identity(10.0 - nima_score, name='nima_loss')
         return nima_loss
 
 
     ### PHOTOREALISM REGULARIZATION
     def calculate_photorealism_regularization(self, image):
-        # image.shape = (1, H, W, C
+        # image.shape = (1, H, W, C)
         HW = self.matting_laplacian.shape[-1]
-        p = tf.reshape(image, (HW, -1))
-        return tf.reduce_sum(p * self.matting_laplacian.matmul(p))
+        p = tf.cast(tf.reshape(image, (HW, -1)), tf.float64)
+        return tf.cast(tf.reduce_sum(p * self.matting_laplacian.matmul(p)), image.dtype)
 
 def dict_zip(*dicts):
     for k in dicts[0].keys():

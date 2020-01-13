@@ -1,21 +1,31 @@
 import os
 
-from keras.applications.inception_resnet_v2 import InceptionResNetV2
-from keras.layers import Dense, Dropout
-from keras.models import Model
+import tensorflow as tf
 
-from components.path import WEIGHTS_DIR
+from tensorflow.keras.applications.inception_resnet_v2 import InceptionResNetV2
+import tensorflow.keras.layers as layers
 
+from components.util import WEIGHTS_DIR
 
-def get_nima_model(input=None):
-    base_model = InceptionResNetV2(input_shape=(None, None, 3), include_top=False, pooling='avg', weights=None,
-                                   input_tensor=input)
-    x = Dropout(0.75)(base_model.output)
-    x = Dense(10, activation='softmax')(x)
+class NIMAModel(tf.keras.Model):
+    def __init__(self):
+        super(NIMAModel, self).__init__(name='NIMAModel')
+        self.inception = InceptionResNetV2(
+            include_top=False,
+            input_shape=(None,None,3),
+            pooling='avg',
+            weights=None
+        )
+        self.dropout = layers.Dropout(0.25)
+        self.dense = layers.Dense(10, activation='softmax')
 
-    model = Model(base_model.input, x)
-    model.load_weights(os.path.join(WEIGHTS_DIR, 'NIMA/inception_resnet_weights.h5'))
-    return model
+        self.load_weights(os.path.join(WEIGHTS_DIR, 'NIMA/inception_resnet_weights.h5'), by_name=True)
+        self.trainable = False
+
+    def call(self, inputs):
+        x = self.inception(inputs)
+        x = self.dropout(x)
+        return self.dense(x)
 
 
 def preprocess(image):
