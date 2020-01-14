@@ -5,9 +5,22 @@ import tensorflow as tf
 
 class MattingLaplacian(tf.linalg.LinearOperator):
     r"""
-        Matting laplacian operator as defined
+        Matting laplacian operator as defined in:
+        Fast matting using large kernel matting Laplacian matrices, He et al.
     """
-    def __init__(self, image, epsilon=1e-5, window_radius=1, fname=None):
+    def __init__(self, image, epsilon=1e-5, window_radius=1):
+        r"""
+            Initialize the matting laplacian
+
+            Parameters
+            ----------
+            image: tf.Tensor(shape=(H,W,C), dtype=tf.float64)
+                content image
+            epsilon: float
+                regulariration term
+            window_radius: int
+                size of the window for means and covariance matrices
+        """
         super(MattingLaplacian, self).__init__(
             image.dtype,
             graph_parents=[image],
@@ -27,8 +40,10 @@ class MattingLaplacian(tf.linalg.LinearOperator):
         prod_image = self.image @ self._transpose(self.image)
         prod_iimg = self.integral_image(prod_image)
 
-        n = self.window_area = (2*self.radius+1)**2
         H, W, C = self.size
+        n = self.window_area = (2*self.radius+1)**2
+        # windows_sizes = self.add_border(tf.ones((H,W,1,1)), mode='CONSTANT')
+        # n = self.window_area = self.compute_sums(self.integral_image(windows_sizes))
 
         # compute stats
         sums = self.compute_sums(iimg)
@@ -37,10 +52,6 @@ class MattingLaplacian(tf.linalg.LinearOperator):
         self.delta_inv = tf.linalg.inv(sigma + epsilon/n * tf.eye(C, batch_shape=(H,W), dtype=image.dtype))
 
     # LinearOperator methods
-    # def _diag_part(self):
-    #     H, W, _ = self.size
-    #     eye = tf.eye(H*W)
-    #     return tf.stack([self.matvec(eye[:,i])[i] for i in range(H*W)])
 
     def _shape(self):
         H, W, _ = self.size
@@ -166,25 +177,24 @@ class MattingLaplacian(tf.linalg.LinearOperator):
 
 
     # add and crop borders to images to compute means over full windows
-    def add_border(self, img):
+    @tf.function
+    def add_border(self, img, mode='SYMMETRIC'):
         r"""
-            Add a zeros-border of width r around the image
+            Add a border of width r around the image
 
             Parameters
             ----------
-            img: tf.Tensor(shape=(H,W,C,1), dtype=self.dtype)
+            img: tf.Tensor(shape=(H,W,...), dtype=tf.float64)
 
             Returns
             -------
-            tf.Tensor(shape=(H+2*r+1,W+2*r+1,C,1), dtype=self.dtype)
+            tf.Tensor(shape=(H+2*r+1,W+2*r+1,...), dtype=tf.float64)
         """
-        H, W, _ = self.size
         r = self.radius
-
-        padding = lambda x: tf.image.pad_to_bounding_box(x, r+1, r+1, H+2*r+1, W+2*r+1)
-
-        return tf.transpose(padding(tf.transpose(img, perm=(3,0,1,2))), perm=(1,2,3,0))
-        # return pad_image
+        # paddings = 2*[[r+1,r]] + (int(tf.rank(img))-2)*[[0,0]]
+        # tf.print(paddings)
+        # return tf.pad(img, tf.constant(paddings), mode=mode)
+        return tf.pad(img, tf.constant([[r+1,r],[r+1,r],[0,0],[0,0]]), mode=mode)
 
     def crop_border(self, img):
         H, W, _ = self.size
@@ -239,3 +249,11 @@ class MattingLaplacian(tf.linalg.LinearOperator):
         for i in (0,1):
             iimg = tf.cumsum(iimg, axis=i)
         return iimg
+
+
+if __name__ == '__main__':
+    H, W, C = 4, 4, 3
+    image = tf.random.uniform((H,W,C))
+    m = MattingLaplacian(image)
+    w = m.add_border(tf.ones((H,W,1,1)), mode='CONSTANT')
+    tf.print(tf.squeeze(m.compute_sums(m.integral_image(w))))
