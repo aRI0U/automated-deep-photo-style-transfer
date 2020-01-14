@@ -200,6 +200,10 @@ if __name__ == "__main__":
     if args.gpu:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+
     if not args.results_dir:
         from datetime import datetime
         timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M')
