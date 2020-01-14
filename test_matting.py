@@ -5,8 +5,8 @@ import tensorflow as tf
 from components.matting_v2 import MattingLaplacian
 from components.matting_v3 import MattingLaplacian as ML3
 
-H, W, C = 3,2,3
-image = tf.random.uniform((H,W,C))
+H, W, C = 3,3,3
+image = tf.random.uniform((H,W,C), dtype=tf.float32)
 # image = tf.constant([
 #     [[2,2],[0,0],[1,1]],
 #     [[0,0],[0,0],[2,2]],
@@ -44,7 +44,9 @@ L3 = m3.to_dense()
 # t2 = time.time()
 # print(t2-t1)
 tf.print(L)
+print()
 tf.print(L3)
 tf.print(tf.reduce_min(tf.linalg.eigvalsh(L)))
+tf.print(tf.reduce_min(tf.linalg.eigvalsh(L3)))
 # tf.print(m2.matmul(cols[:,0]))
 # tf.print(m2.matmul(cols[:,1]))
