@@ -1,14 +1,12 @@
 import argparse
 import json
 import os
+import time
 
 import cv2
 import numpy as np
 import tensorflow as tf
 
-from PIL import Image
-
-# import components.NIMA.model as nima
 from components.VGG19.model import StyleContentModel
 from components.segmentation import compute_segmentation
 from components.semantic_merge import merge_segments, reduce_dict, mask_for_tf, extract_segmentation_masks
@@ -63,11 +61,6 @@ def load_image(filename, dtype):
     image = tf.image.convert_image_dtype(image_decoded, dtype)
     image = tf.expand_dims(image, 0)
     return image
-
-def load_dim(filename):
-    img = Image.open(filename)
-    return (1,) + np.asarray(img).shape
-
 
 def save_image(image, filename):
     tf.io.write_file(filename, image)
@@ -345,10 +338,14 @@ if __name__ == "__main__":
     min_loss = float('inf')
     best_image = None
 
+    epoch_duration = 0
 
     for i in range(1, args.iter + 1):
         # summary_writer.add_summary(summary, i)
+        t0 = time.time()
         loss_dict = train_step(transfer_image)
+        t1 = time.time()
+        epoch_duration += t1 - t0
 
         if i % args.print_loss_interval == 0:
             tf.print("[Iter {}]".format(i), end='\t')
@@ -362,4 +359,5 @@ if __name__ == "__main__":
         if i % args.intermediate_result_interval == 0:
             save_image(best_image, os.path.join(iterations_dir, "iter_{}.png".format(i)))
 
-        # save_image(result, os.path.join(args.results_dir, "final_transfer_image.png"))
+    print("Style transfer finished. Average time per epoch: {:.5f}s\n".format(epoch_duration/args.iter))
+    # save_image(result, os.path.join(args.results_dir, "final_transfer_image.png"))
