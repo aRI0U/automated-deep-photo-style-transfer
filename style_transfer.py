@@ -318,7 +318,7 @@ if __name__ == "__main__":
     )
 
     # TODO: init_image instead of content_image
-    transfer_image = tf.Variable(content_image, trainable=True, shape=load_dim(args.content_image))
+    transfer_image = tf.Variable(content_image, trainable=True)
 
     @tf.function
     def train_step(image):
