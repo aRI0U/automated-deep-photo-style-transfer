@@ -1,6 +1,3 @@
-import os
-import numpy as np
-
 import tensorflow as tf
 import tensorflow.keras.applications.vgg19 as vgg19
 

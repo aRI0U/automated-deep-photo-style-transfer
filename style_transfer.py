@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from pathlib import Path
 import time
 
 import cv2
@@ -62,8 +63,8 @@ def load_image(filename, dtype):
     image = tf.expand_dims(image, 0)
     return image
 
-def save_image(image, filename):
-    tf.io.write_file(filename, image)
+def save_image(image, file):
+    tf.io.write_file(file.name, image)
 
 def tensor_to_image(tensor):
     r"""
@@ -114,9 +115,9 @@ def write_metadata(args, load_segmentation):
             "epsilon": args.adam_epsilon
         }
     }
-    filename = os.path.join(args.results_dir, "meta.json")
-    with open(filename, "w+") as file:
-        file.write(json.dumps(meta, indent=4))
+    file = experiment_path / 'meta.json'
+    with file.open('w+') as f:
+        f.write(json.dumps(meta, indent=4))
 
 
 if __name__ == "__main__":
@@ -126,10 +127,11 @@ if __name__ == "__main__":
     base = parser.add_argument_group('Base options')
     expr = parser.add_argument_group('Experiment parameters')
     param = parser.add_argument_group('Hyperparameters')
+    dirs = parser.add_argument_group('Storage directories')
     misc = parser.add_argument_group('Miscellaneous')
 
-    base.add_argument("-c", "--content_image", type=str, help="content image path", default="blanc.jpg")
-    base.add_argument("-s", "--style_image", type=str, help="style image path", default="bear.jpeg")
+    base.add_argument("-c", "--content_image", type=str, help="Content image path", default="blanc.jpg")
+    base.add_argument("-s", "--style_image", type=str, help="Style image path", default="bear.jpeg")
     base.add_argument("-o", "--output_image", type=str, help="Output image path, default: result.jpg",
                         default="result.jpg")
 
@@ -182,12 +184,17 @@ if __name__ == "__main__":
     param.add_argument("--semantic_thresh", type=float, help="Semantic threshold for label grouping., default: 0.8",
                         default=0.8)
 
-    misc.add_argument("--gpu", type=str, help="comma separated list of GPU(s) to use.",
+    dirs.add_argument("--logs_dir", type=Path, help="Path to tensorboard logs., default: ./logs",
+                        default=Path('logs'))
+    dirs.add_argument("--results_dir", type=Path, help='Where results are stored., default: ./experiments',
+                        default=Path('experiments'))
+    dirs.add_argument("--seg_dir", type=Path, help='Where segmented images are stored., default: ./raw_seg',
+                        default=Path('raw_seg'))
+
+    misc.add_argument("--gpu", type=str, help="Comma separated list of GPU(s) to use.",
                         default="0")
-    misc.add_argument("--results_dir", type=str, help='where results are stored., default: ./experiments/result_<timestamp>',
+    misc.add_argument("--experiment_name", type=str, help="Name of the experiment., default: <timestamp>",
                         default=None)
-    misc.add_argument("--seg_dir", type=str, help='where segmented images are stored., default: ./raw_seg',
-                        default='raw_seg')
     misc.add_argument("--intermediate_result_interval", type=int,
                         help="Interval of iterations until a intermediate result is saved., default: 100",
                         default=20)
@@ -204,13 +211,13 @@ if __name__ == "__main__":
     for gpu in gpus:
         tf.config.experimental.set_memory_growth(gpu, True)
 
-    if not args.results_dir:
+    if not args.experiment_name:
         from datetime import datetime
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M')
-        args.results_dir = os.path.join('experiments', timestamp)
-    os.makedirs(args.results_dir, exist_ok=True)
+        args.experiment_name = datetime.now().strftime('%Y-%m-%d_%H:%M')
+    experiment_path = args.results_dir / args.experiment_name
+    experiment_path.mkdir(parents=True, exist_ok=True)
 
-    os.makedirs(args.seg_dir, exist_ok=True)
+    args.seg_dir.mkdir(parents=True, exist_ok=True)
 
     # check if manual segmentation masks are available
     content_segmentation_filename = change_filename(args.seg_dir, args.content_image, '_seg', '.png')
@@ -219,12 +226,14 @@ if __name__ == "__main__":
 
     write_metadata(args, load_segmentation)
 
-    """Check if image files exist"""
-    for path in [args.content_image, args.style_image]:
-        if path is None or not os.path.isfile(path):
-            print("Image file {} does not exist.".format(path))
-            exit(1)
+    # args.content_image = args.data_dir / args.content_image
+    # args.style_image = args.data_dir / args.style_image
 
+    """Check if image files exist"""
+    for file in [args.content_image, args.style_image]:
+        if not os.path.exists(file):
+            print("Image file {} does not exist.".format(file))
+            exit(1)
 
     tf.keras.backend.set_floatx(args.dtype)
 
@@ -266,8 +275,8 @@ if __name__ == "__main__":
         print("Init image parameter {} unknown.".format(args.init))
         exit(1)
 
-    iterations_dir = os.path.join(args.results_dir, "iterations")
-    os.makedirs(iterations_dir, exist_ok=True)
+    iterations_dir = experiment_path / 'iter'
+    iterations_dir.mkdir(exist_ok=True)
 
 
 
@@ -319,21 +328,14 @@ if __name__ == "__main__":
 
     @tf.function
     def train_step(image):
+        # forward
         with tf.GradientTape() as tape:
             outputs = features_extractor(image)
-            #
-            # # photorealism_regularization = calculate_photorealism_regularization(transfer_image, content_image, args.matting)
-            #
-            # # nima_loss = compute_nima_loss(transfer_image_nima)
-            #
-            # content_loss = args.content_weight * content_loss
-            # style_loss = 0#args.style_weight * style_loss
-            # photorealism_regularization = 0#args.regularization_weight * photorealism_regularization
-            # nima_loss = 0#args.nima_weight * nima_loss
-            # total_loss = content_loss + style_loss + photorealism_regularization + nima_loss
             loss_dict = compute_loss(image, outputs)
 
         total_loss = loss_dict['Total loss']
+
+        # backward
         grad = tape.gradient(total_loss, image)
         optimizer.apply_gradients([(grad, image)])
         image.assign(tf.clip_by_value(image, 0, 1))
@@ -344,6 +346,8 @@ if __name__ == "__main__":
 
     epoch_duration = 0
 
+    writer = tf.summary.create_file_writer(str(args.logs_dir / args.experiment_name))
+
     for i in range(1, args.iter + 1):
         # summary_writer.add_summary(summary, i)
         t0 = time.time()
@@ -353,15 +357,19 @@ if __name__ == "__main__":
 
         if i % args.print_loss_interval == 0:
             tf.print("[Iter {}]".format(i), end='\t')
-            for key in loss_dict:
-                tf.print('{}: {:<15.3f}'.format(key, loss_dict[key]), end='')
+            for loss_name, loss_value in loss_dict.items():
+                tf.print('{}: {:<15.3f}'.format(loss_name, loss_value), end='')
             tf.print()
+
+        with writer.as_default():
+            for loss_name, loss_value in loss_dict.items():
+                tf.summary.scalar(loss_name, loss_value, step=i)
         #
         if loss_dict['Total loss'].numpy() < min_loss:
             min_loss, best_image = loss_dict['Total loss'], tensor_to_image(transfer_image)
         #
         if i % args.intermediate_result_interval == 0:
-            save_image(best_image, os.path.join(iterations_dir, "iter_{}.png".format(i)))
+            save_image(best_image, iterations_dir / "iter_{}.png".format(i))
 
     print("Style transfer finished. Average time per epoch: {:.5f}s\n".format(epoch_duration/args.iter))
     # save_image(result, os.path.join(args.results_dir, "final_transfer_image.png"))
