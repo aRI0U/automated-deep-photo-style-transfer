@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 from components.NIMA.model import NIMAModel
-from components.matting_v2 import MattingLaplacian
+from components.matting_v3 import MattingLaplacian
 
 class Loss:
     r"""

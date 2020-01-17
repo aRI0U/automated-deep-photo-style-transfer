@@ -296,8 +296,8 @@ if __name__ == "__main__":
         content_target,
         style_target,
         args,
-        mask_for_tf(content_segmentation_masks),
-        mask_for_tf(style_segmentation_masks)
+        #mask_for_tf(content_segmentation_masks),
+        #mask_for_tf(style_segmentation_masks)
     )
 
     if args.regularization_weight > 0:
