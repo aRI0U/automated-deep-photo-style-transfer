@@ -181,8 +181,8 @@ if __name__ == "__main__":
     param.add_argument("--matting_window_radius", type=int,
                         help="Size of the windows considered by matting laplacian., default=3",
                         default=3)
-    param.add_argument("--semantic_thresh", type=float, help="Semantic threshold for label grouping., default: 0.8",
-                        default=0.8)
+    param.add_argument("--semantic_thresh", type=float, help="Semantic threshold for label grouping., default: 0.5",
+                        default=0.5)
 
     dirs.add_argument("--logs_dir", type=Path, help="Path to tensorboard logs., default: ./logs",
                         default=Path('logs'))
@@ -370,6 +370,8 @@ if __name__ == "__main__":
         #
         if i % args.intermediate_result_interval == 0:
             save_image(best_image, iterations_dir / "iter_{}.png".format(i))
+            with writer.as_default():
+                tf.summary.image('Transfer image', transfer_image, step=i)
 
     print("Style transfer finished. Average time per epoch: {:.5f}s\n".format(epoch_duration/args.iter))
     # save_image(result, os.path.join(args.results_dir, "final_transfer_image.png"))
