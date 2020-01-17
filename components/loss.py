@@ -102,7 +102,6 @@ class Loss:
         return tf.matmul(matrix_masked, matrix_masked, transpose_a=True)
 
     def calculate_layer_style_loss(self, target, output):
-        # TODO: use only tf, no numpy
         # scale masks to current layer
         content_masks, style_masks = self.content_masks, self.style_masks
         output_size = output.shape[1:3]
@@ -120,8 +119,6 @@ class Loss:
             style_masks = [tf.constant(1., shape=target_size)]
             content_masks = [tf.constant(1., shape=output_size)]
 
-        # feature_map_count = np.float32(output.shape[3])
-        # feature_map_size = np.float32(output.shape[1]) * np.float32(output.shape[2])
         _, H, W, C = output.shape
         feature_map_size = tf.cast(H*W, output.dtype)
         feature_map_count = tf.cast(C, output.dtype)
