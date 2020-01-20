@@ -311,8 +311,10 @@ if __name__ == "__main__":
 
     if args.regularization_weight > 0:
         print('Initializing matting laplacian...', end='\t', flush=True)
+        t0 = time.time()
         compute_loss.initialize_matting_laplacian(tf.cast(tf.squeeze(content_image), tf.float64))
-        print('Done.')
+        t1 = time.time()
+        print('Done. {:.3f}s'.format(t1-t0))
 
     # TODO: summary cf tf1
 
