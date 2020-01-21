@@ -349,7 +349,7 @@ if __name__ == "__main__":
     writer = tf.summary.create_file_writer(str(args.logs_dir / args.experiment_name))
 
     for i in range(1, args.iter + 1):
-        # summary_writer.add_summary(summary, i)
+        tf.summary.experimental.set_step(i)
         t0 = time.time()
         loss_dict = train_step(transfer_image)
         t1 = time.time()
@@ -360,18 +360,23 @@ if __name__ == "__main__":
             for loss_name, loss_value in loss_dict.items():
                 tf.print('{}: {:<15.3f}'.format(loss_name, loss_value), end='')
             tf.print()
-
-        with writer.as_default():
-            for loss_name, loss_value in loss_dict.items():
-                tf.summary.scalar(loss_name, loss_value, step=i)
         #
         if loss_dict['Total loss'].numpy() < min_loss:
             min_loss, best_image = loss_dict['Total loss'], tensor_to_image(transfer_image)
         #
-        if i % args.intermediate_result_interval == 0:
-            save_image(best_image, iterations_dir / "iter_{}.png".format(i))
-            with writer.as_default():
-                tf.summary.image('Transfer image', transfer_image, step=i)
+        # if i % args.intermediate_result_interval == 0:
+        #     save_image(best_image, iterations_dir / "iter_{}.png".format(i))
+
+        # tensorboard
+
+        with writer.as_default():
+            # plot loss
+            for loss_name, loss_value in loss_dict.items():
+                tf.summary.scalar(loss_name, loss_value)
+
+            # display transfer image
+            if i % args.intermediate_result_interval == 0:
+                tf.summary.image('Transfer image', transfer_image)
 
     print("Style transfer finished. Average time per epoch: {:.5f}s\n".format(epoch_duration/args.iter))
     # save_image(result, os.path.join(args.results_dir, "final_transfer_image.png"))
